@@ -7,7 +7,8 @@ const multer = require("multer");
 // require('./cronJobs');
 
 const authRoutes = require("./src/routes/authRoutes");
-const writingPlan = require("./src/routes/writingPlanRoutes");
+const writingRoutes = require("./src/routes/writingPlanRoutes");
+const sprintRoutes = require("./src/routes/sprintRoutes");
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -24,7 +25,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 app.use("/api/auth", authRoutes);
-app.use("/api/writingPlan", writingPlan);
+app.use("/api/writingPlan", writingRoutes);
+app.use("/api/sprint", sprintRoutes);
 
 
 app.use((err, req, res, next) => {

@@ -62,16 +62,66 @@ async function fetchLoginUserSprint(userId) {
 }
 
 async function endSprint(sprintId, wordsWritten, checkout) {
-    return prisma.sprint.update({
+    // 1. End the sprint
+    const sprint = await prisma.sprint.update({
         where: { id: sprintId },
         data: {
-            wordsWritten: wordsWritten || 0,        // Default to 0 if undefined
-            checkout: checkout || null,              // Default to null if undefined
-            completedAt: new Date(),                 // Should always work
+            wordsWritten: wordsWritten || 0,
+            checkout: checkout || null,
+            completedAt: new Date(),
             isActive: false,
             isPause: false
         }
     });
+
+    // 2. AUTO-CHECK TODAY IN WEEKLY PROGRESS
+    await checkOffToday(sprint.userId);
+
+    return sprint;
+}
+
+// Helper function to check off today
+async function checkOffToday(userId) {
+    const today = new Date();
+    const weekStart = getStartOfWeek(today);
+    const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon, etc.
+    
+    const dayMap = [
+        'sundayDone',
+        'mondayDone', 
+        'tuesdayDone',
+        'wednesdayDone',
+        'thursdayDone',
+        'fridayDone',
+        'saturdayDone'
+    ];
+    
+    // Get or create this week's progress
+    await prisma.weeklyProgress.upsert({
+        where: {
+            userId_weekStart: {
+                userId,
+                weekStart
+            }
+        },
+        create: {
+            userId,
+            weekStart,
+            [dayMap[dayOfWeek]]: true  //Check today
+        },
+        update: {
+            [dayMap[dayOfWeek]]: true  //Check today
+        }
+    });
+}
+
+function getStartOfWeek(date) {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
+    const monday = new Date(d.setDate(diff));
+    monday.setHours(0, 0, 0, 0);
+    return monday;
 }
 
 function getTodayRange() {

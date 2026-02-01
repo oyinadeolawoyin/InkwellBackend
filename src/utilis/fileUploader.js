@@ -1,5 +1,5 @@
 const fs = require('fs/promises');
-const { supabase } = require('../src/config/supabaseClient');
+const { supabase } = require('../config/supabaseClient');
 const path = require('path');
 
 function sanitizeFilename(filename) {
@@ -54,7 +54,7 @@ async function deleteFile(publicUrl) {
     console.log("Deleting file from Supabase:", storagePath);
     
     const { error } = await supabase.storage
-      .from('voices')
+      .from('inkwell')
       .remove([storagePath]);
 
     if (error) {
@@ -92,7 +92,7 @@ async function deleteFiles(publicUrls) {
     console.log("Deleting files from Supabase:", storagePaths);
     
     const { error } = await supabase.storage
-      .from('voices')
+      .from('inkwell')
       .remove(storagePaths);
 
     if (error) {
@@ -118,7 +118,7 @@ async function uploadFile(file) {
 
     console.log("Uploading to Supabase at path:", supabasePath);
     const { data, error } = await supabase.storage
-      .from('voices')
+      .from('inkwell')
       .upload(supabasePath, fileBuffer, {
         contentType: file.mimetype,
       });
@@ -126,7 +126,7 @@ async function uploadFile(file) {
     if (error) throw error;
 
     const { data: publicUrlData } = supabase.storage
-      .from('voices')
+      .from('inkwell')
       .getPublicUrl(supabasePath);
 
     const publicUrl = publicUrlData.publicUrl;

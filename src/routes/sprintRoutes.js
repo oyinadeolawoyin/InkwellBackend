@@ -11,6 +11,6 @@ router.get("/sprintDays", authenticateJWT, sprintController.fetchSprintDays); //
 
 router.post("/startSprint", authenticateJWT, sprintController.startSprint);
 router.post("/:sprintId/endSprint", authenticateJWT, sprintController.endSprint); 
-router.post("/:sprintId/:isPause", authenticateJWT, sprintController.pauseSprint);
+router.post("/:sprintId/pause/:isPause", authenticateJWT, sprintController.pauseSprint);
 
 module.exports = router;

@@ -15,6 +15,15 @@ const prisma = require("../config/prismaClient");
 // ==================== User Operations ====================
 
 /**
+ * Count total number of users
+ * @returns {Promise<number>} Total user count
+ */
+async function countUsers() {
+  return await prisma.user.count();
+}
+
+
+/**
  * Create a new user account
  * @param {Object} userData - User data object
  * @param {string} userData.username - Username
@@ -38,13 +47,22 @@ async function createUser({
     });
 }
 
-
-/**
- * Count total number of users
- * @returns {Promise<number>} Total user count
- */
-async function countUsers() {
-  return await prisma.user.count();
+async function updateUser({ 
+  userId,
+  username,  
+  email, 
+  bio,
+  avartar
+}) {
+  return await prisma.user.update({
+    where: { id: userId },
+    data: {
+      username,
+      email,
+      bio,
+      avartar
+    },
+  });
 }
 
 /**
@@ -57,11 +75,9 @@ async function fetchUsers() {
       id: true,
       username: true,
       email: true,
-      img: true,
+      avatar: true,
       bio: true,
-      role: true,
-      country: true,
-      gender: true
+      createdAt: true
     },
     orderBy: {
       id: 'desc'
@@ -74,28 +90,9 @@ async function fetchUsers() {
  * @param {number} id - User ID
  * @returns {Promise<Object|null>} User object with social, follower data, and content counts
  */
-async function fetchUser(id) {
+async function fetchUser(userId) {
   return await prisma.user.findUnique({
-    where: { id },
-    include: {
-      social: true,
-      followers: { 
-        select: { 
-          followerId: true,
-        },
-      }, 
-      _count: {
-        select: {
-          followers: true,
-          followings: true,
-          stories: true,           
-          collection: true,         
-          images: true,            
-          videos: true,           
-          recommendations: true     
-        }
-      }
-    }
+    where: { id: userId },
   });
 }
 
@@ -104,69 +101,9 @@ async function fetchUser(id) {
  * @param {number} id - User ID to delete
  * @returns {Promise<Object>} Deleted user object
  */
-async function deleteUser(id) {
+async function deleteUser(userId) {
   return await prisma.user.delete({
-    where: { id }
-  });
-}
-
-/**
- * Update user profile information
- * @param {Object} userData - User data to update
- * @param {string} userData.username - Username
- * @param {string} userData.password - Hashed password
- * @param {string} userData.email - Email address
- * @param {string} userData.country - User's country
- * @param {string} userData.gender - User's gender
- * @param {string} userData.bio - User biography
- * @param {string} userData.img - Profile image URL
- * @param {number} userData.writestreak - Write streak count
- * @param {number} userData.readstreak - Read streak count
- * @param {string} userData.instagram - Instagram handle
- * @param {string} userData.facebook - Facebook profile
- * @param {string} userData.twitter - Twitter handle
- * @param {string} userData.discord - Discord username
- * @param {string} userData.donation - Donation link
- * @param {number} userData.id - User ID
- * @returns {Promise<Object>} Updated user object
- */
-async function updateUser({ 
-  username, 
-  password, 
-  email, 
-  country, 
-  gender, 
-  bio, 
-  img, 
-  writestreak, 
-  readstreak, 
-  instagram, 
-  facebook, 
-  twitter, 
-  discord, 
-  donation, 
-  id,
-  role 
-}) {
-  return await prisma.user.update({
-    where: { id },
-    data: {
-      username,
-      password,
-      email,
-      country,
-      gender,
-      bio,
-      img,
-      writestreak, 
-      readstreak,    
-      instagram,   
-      facebook,    
-      twitter,     
-      discord,     
-      donation,
-      role
-    },
+    where: { id: userId }
   });
 }
 
@@ -174,10 +111,10 @@ async function updateUser({
 // ==================== Exports ====================
 
 module.exports = {
-  createUser,
-  fetchUsers,
   countUsers,
+  createUser,
+  updateUser,
+  fetchUsers,
   fetchUser,
   deleteUser,
-  updateUser,
 };

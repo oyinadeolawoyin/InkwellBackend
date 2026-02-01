@@ -9,6 +9,7 @@ const multer = require("multer");
 const authRoutes = require("./src/routes/authRoutes");
 const writingRoutes = require("./src/routes/writingPlanRoutes");
 const sprintRoutes = require("./src/routes/sprintRoutes");
+const writingProgress = require("./src/routes/writingProgressRoutes");
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -27,6 +28,7 @@ app.use(cookieParser());
 app.use("/api/auth", authRoutes);
 app.use("/api/writingPlan", writingRoutes);
 app.use("/api/sprint", sprintRoutes);
+app.use("/api/progress", writingProgress);
 
 
 app.use((err, req, res, next) => {

@@ -1,6 +1,6 @@
 require("dotenv").config();
 const userService = require("../services/userService");
-const fileUploader = require("../utilis/fileUploader");
+// const fileUploader = require("../utilis/fileUploader");
 
 async function updateUser(req, res) {
     const errors = validationResult(req);
@@ -69,7 +69,7 @@ async function fetchUsers(req, res) {
 }
 
 async function fetchUser(req, res) {
-    const userId = req.user.id;
+    const userId = req.params.userId;
     try {
         const user = await userService.fetchUser(Number(userId));
         res.status(200).json({ user });
@@ -91,7 +91,7 @@ async function deleteUser(req, res) {
 }
 
 module.exports = {
-    updateUser,
+    // updateUser,
     fetchUsers,
     fetchUser,
     deleteUser

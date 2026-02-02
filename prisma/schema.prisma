@@ -22,6 +22,7 @@ model User {
   sprints        Sprint[]
   writingPlan    WritingPlan?
   weeklyProgress WeeklyProgress[]
+  quoteLikes     QuoteLike[]
 }
 
 model Project {
@@ -104,6 +105,26 @@ model WeeklyProgress {
   @@unique([userId, weekStart]) // One record per user per week
   @@index([userId])
   @@index([weekStart])
+}
+
+model Quote {
+  id        Int      @id @default(autoincrement())
+  title     String?
+  content   String
+  createdAt DateTime @default(now())
+
+  likes     QuoteLike[]
+}
+
+model QuoteLike {
+  id      Int   @id @default(autoincrement())
+  userId  Int
+  quoteId Int
+
+  user    User  @relation(fields: [userId], references: [id])
+  quote   Quote @relation(fields: [quoteId], references: [id])
+
+  @@unique([userId, quoteId]) // 🚫 prevents double-like
 }
 
 enum Role {

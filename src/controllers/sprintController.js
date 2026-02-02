@@ -102,7 +102,7 @@ async function sprintOfTheDay(req, res) {
 }
 
 async function fetchSprintDays(req, res) {
-    const userId = req.user.id;
+    const userId = req.params.userId;
     
     try {
         sprintDays = await sprintService.fetchSprintDays(Number(userId));

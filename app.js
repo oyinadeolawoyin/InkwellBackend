@@ -9,7 +9,10 @@ const multer = require("multer");
 const authRoutes = require("./src/routes/authRoutes");
 const writingRoutes = require("./src/routes/writingPlanRoutes");
 const sprintRoutes = require("./src/routes/sprintRoutes");
-const writingProgress = require("./src/routes/writingProgressRoutes");
+const writingProgressRoutes = require("./src/routes/writingProgressRoutes");
+const projectRoutes = require("./src/routes/projectRoutes");
+const userRoutes = require("./src/routes/userRoutes");
+const quoteRoutes = require("./src/routes/quoteRoutes");
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -28,8 +31,10 @@ app.use(cookieParser());
 app.use("/api/auth", authRoutes);
 app.use("/api/writingPlan", writingRoutes);
 app.use("/api/sprint", sprintRoutes);
-app.use("/api/progress", writingProgress);
-
+app.use("/api/progress", writingProgressRoutes);
+app.use("/api/projects", projectRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/quote", quoteRoutes);
 
 app.use((err, req, res, next) => {
     if (err instanceof multer.MulterError || err.message === "Unsupported file type") {

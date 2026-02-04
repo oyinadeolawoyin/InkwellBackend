@@ -9,7 +9,7 @@ async function createWritingplan(req, res) {
     fridayTime, saturdayTime, sundayTime
   } = req.body;
 
-  const userId = req.user.id;
+  const userId = req.user.id; console.log("userId", userId);
   const normalizeGoal = value =>
     value === null ? null : Number(value);
 

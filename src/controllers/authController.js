@@ -15,12 +15,15 @@ const { sendEmail } = require("../config/mailer");
  * Cookie configuration for JWT tokens
  * Automatically adjusts security settings based on environment
  */
+const isProduction = process.env.NODE_ENV === "production";
+
 const cookieOptions = {
   httpOnly: true,
-  secure: false,          // development over HTTP
-  sameSite: "lax",        // works with local cross-origin dev
-  maxAge: 1000 * 60 * 60 * 24 * 21,  // 21 days
+  secure: isProduction,                 // true on Render
+  sameSite: isProduction ? "none" : "lax",
+  maxAge: 1000 * 60 * 60 * 24 * 21,
 };
+
 
 // ============================================
 // AUTHENTICATION OPERATIONS

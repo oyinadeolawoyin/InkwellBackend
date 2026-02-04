@@ -83,7 +83,7 @@ async function endSprint(req, res) {
     // Create personalized message based on performance
     let message = "Your writing sprint has come to an end. Take a breath and be proud of the words you showed up for today. Every line counts 🌱";
     
-    const link = `http://localhost:5173/sprints/${sprintId}`;
+    const link = `https://inkwell-inky-three.vercel.app/dashboard`;
     
     // Send notification (in-app, push, and email)
     await notifyUser(user, message, link);

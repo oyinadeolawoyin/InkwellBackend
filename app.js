@@ -18,10 +18,22 @@ const notificationRoutes = require("./src/routes/notificationRoutes");
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://inkwell-inky-three.vercel.app",
+];
+
 const corsOptions = {
-  origin: ["http://localhost:5173", "https://inkwell-inky-three.vercel.app"],
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   credentials: true,
 };
+
 
 // Enable CORS globally
 app.use(cors(corsOptions));

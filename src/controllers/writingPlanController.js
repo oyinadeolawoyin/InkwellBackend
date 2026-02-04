@@ -10,17 +10,19 @@ async function createWritingplan(req, res) {
   } = req.body;
 
   const userId = req.user.id;
+  const normalizeGoal = value =>
+    value === null ? null : Number(value);
 
   try {
     const writingPlan = await writingPlanService.createWritingPlan(
       Number(userId),
-      Number(mondayGoal),
-      Number(tuesdayGoal),
-      Number(wednesdayGoal),
-      Number(thursdayGoal),
-      Number(fridayGoal),
-      Number(saturdayGoal),
-      Number(sundayGoal),
+      normalizeGoal(mondayGoal),
+      normalizeGoal(tuesdayGoal),
+      normalizeGoal(wednesdayGoal),
+      normalizeGoal(thursdayGoal),
+      normalizeGoal(fridayGoal),
+      normalizeGoal(saturdayGoal),
+      normalizeGoal(sundayGoal),
       mondayTime,
       tuesdayTime,
       wednesdayTime,
@@ -46,17 +48,19 @@ async function updateWritingPlan(req, res) {
   } = req.body;
 
   const planId = req.params.planId;
+  const normalizeGoal = value =>
+    value === null ? null : Number(value);
 
   try {
     const writingPlan = await writingPlanService.updateWritingPlan(
       Number(planId),
-      Number(mondayGoal),
-      Number(tuesdayGoal),
-      Number(wednesdayGoal),
-      Number(thursdayGoal),
-      Number(fridayGoal),
-      Number(saturdayGoal),
-      Number(sundayGoal),
+      normalizeGoal(mondayGoal),
+      normalizeGoal(tuesdayGoal),
+      normalizeGoal(wednesdayGoal),
+      normalizeGoal(thursdayGoal),
+      normalizeGoal(fridayGoal),
+      normalizeGoal(saturdayGoal),
+      normalizeGoal(sundayGoal),
       mondayTime,
       tuesdayTime,
       wednesdayTime,

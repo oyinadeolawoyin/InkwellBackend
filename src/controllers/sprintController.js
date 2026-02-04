@@ -1,5 +1,6 @@
 require("dotenv").config();
 const sprintService = require("../services/sprintService");
+const { notifyUser } = require('../services/notificationService');
 
 async function startSprint(req, res) {
     const { duration, checkin } = req.body;
@@ -65,16 +66,33 @@ async function loginUserSession(req, res) {
 }
 
 async function endSprint(req, res) {
-    const { wordsWritten, checkout } = req.body;
-    const sprintId = req.params.sprintId;
+  const { wordsWritten, checkout } = req.body;
+  const sprintId = req.params.sprintId;
+  
+  try {
+    // End the sprint
+    const sprint = await sprintService.endSprint(
+      Number(sprintId), 
+      Number(wordsWritten), 
+      checkout
+    );
 
-    try {
-        const sprint = await sprintService.endSprint(Number(sprintId), Number(wordsWritten), checkout);
-        res.status(200).json({ sprint });
-    } catch(error) {
-        console.error("Sprint end error:", error);
-        res.status(500).json({ message: "Something went wrong. Please try again later." });
-    }
+    // Get user info for notification
+    const user = req.user; // Assuming user is attached to req from auth middleware
+    
+    // Create personalized message based on performance
+    let message = "Your writing sprint has come to an end. Take a breath and be proud of the words you showed up for today. Every line counts 🌱";
+    
+    const link = `http://localhost:5173/sprints/${sprintId}`;
+    
+    // Send notification (in-app, push, and email)
+    await notifyUser(user, message, link);
+
+    res.status(200).json({ sprint });
+  } catch(error) {
+    console.error("Sprint end error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
 }
 
 async function sprintOfTheDay(req, res) {

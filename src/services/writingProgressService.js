@@ -105,7 +105,7 @@ async function getWeeklyProgress(userId) {
             bonusDays++;
         }
     }
-    
+    // console.log("bon", bonusDays);
     // Calculate totals
     const totalSprints = weekSprints.length;
     const totalWords = weekSprints.reduce((sum, s) => sum + s.wordsWritten, 0);

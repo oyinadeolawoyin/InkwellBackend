@@ -13,18 +13,18 @@ const writingProgressRoutes = require("./src/routes/writingProgressRoutes");
 const projectRoutes = require("./src/routes/projectRoutes");
 const userRoutes = require("./src/routes/userRoutes");
 const quoteRoutes = require("./src/routes/quoteRoutes");
+const notificationRoutes = require("./src/routes/notificationRoutes");
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// const corsOptions = {
-// origin: ["https://thevoices.netlify.app", "http://localhost:5173", "http://localhost:5174", "https://thevoices-admin.netlify.app", "https://thevoices-gamma.vercel.app"], 
-// methods: ['GET','POST','PUT','DELETE','OPTIONS'],
-// credentials: true,
-// };
+const corsOptions = {
+  origin: "http://localhost:5173",
+  credentials: true,
+};
 
 // Enable CORS globally
-// app.use(cors(corsOptions));
+app.use(cors(corsOptions));
 
 app.use(cookieParser());
 
@@ -35,6 +35,7 @@ app.use("/api/progress", writingProgressRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/quote", quoteRoutes);
+app.use("/api/notifications", notificationRoutes)
 
 app.use((err, req, res, next) => {
     if (err instanceof multer.MulterError || err.message === "Unsupported file type") {

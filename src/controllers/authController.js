@@ -16,10 +16,10 @@ const { sendEmail } = require("../config/mailer");
  * Automatically adjusts security settings based on environment
  */
 const cookieOptions = {
-    httpOnly: true,  // Prevents client-side JavaScript access
-    secure: process.env.NODE_ENV === "development",  // HTTPS only in production
-    sameSite: process.env.NODE_ENV === 'development' ? 'None' : 'Lax',
-    maxAge: 1000 * 60 * 60 * 24 * 21,  // 21 days
+  httpOnly: true,
+  secure: false,          // development over HTTP
+  sameSite: "lax",        // works with local cross-origin dev
+  maxAge: 1000 * 60 * 60 * 24 * 21,  // 21 days
 };
 
 // ============================================
@@ -102,13 +102,13 @@ async function login(req, res) {
         });
     }
 
-    const { username, password } = req.body;
+    const { email, password } = req.body;
 
     try {
-        // Find user by username
-        const user = await authService.findUserByUsername(username);
+        // Find user by email
+        const user = await authService.findUserByEmail(email);
         if (!user) {
-            return res.status(404).json({ message: "Username does not exist" });
+            return res.status(404).json({ message: "Email does not exist" });
         }
         
         // Verify password

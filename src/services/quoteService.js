@@ -74,9 +74,21 @@ async function fetchQuote() {
   });
 }
 
+async function checkUserLike(userId, quoteId) {
+  return await prisma.quoteLike.findUnique({
+    where: {
+      userId_quoteId: {
+        userId,
+        quoteId,
+      },
+    },
+  });
+}
+
 module.exports = {
   createQuote,
   updateQuote,
   toggleLikeQuote,
-  fetchQuote
+  fetchQuote,
+  checkUserLike
 };

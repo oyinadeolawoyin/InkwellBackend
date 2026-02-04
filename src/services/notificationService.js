@@ -12,7 +12,7 @@
 require('dotenv').config();
 const webpush = require("web-push");
 const { sendEmail } = require("../config/mailer");
-const userService = require("./userService");
+const prisma = require("../config/prismaClient");
 
 // ==================== Configuration ====================
 
@@ -47,6 +47,26 @@ async function sendPushNotification(subscription, payload) {
 // ==================== Unified Notification System ====================
 
 /**
+ * Create a notification for a user
+ * @param {Object} notificationData - Notification data
+ * @param {string} notificationData.username - Username of recipient
+ * @param {string} notificationData.link - URL link for notification
+ * @param {string} notificationData.message - Notification message
+ * @param {number} notificationData.userId - User ID of recipient
+ * @returns {Promise<Object>} Created notification object
+ */
+async function addNotification({ username, link, message, userId }) {
+  return await prisma.notification.create({
+    data: {
+      username,
+      message,
+      link,
+      userId
+    }
+  });
+}
+
+/**
  * Notify a user through multiple channels (in-app, push, email)
  * @param {Object} user - User object
  * @param {number} user.id - User ID
@@ -58,7 +78,7 @@ async function sendPushNotification(subscription, payload) {
  */
 async function notifyUser(user, message, link) {
   // 1. Save in-app notification in database
-  await userService.addNotification({
+  await addNotification({
     username: user.username,
     message,
     link: link,
@@ -66,7 +86,7 @@ async function notifyUser(user, message, link) {
   });
 
   // 2. Send web push notifications to all user's subscribed devices
-  const subscriptions = await userService.getUserSubscriptions(user.id);
+  const subscriptions = await getUserSubscriptions(user.id);
   console.log("sub", subscriptions); // Optional: for debugging
   
   const payload = { 
@@ -83,6 +103,12 @@ async function notifyUser(user, message, link) {
   await sendEmail(user.email, "New Notification", html);
 }
 
+async function getUserSubscriptions(userId) {
+  return await prisma.subscription.findMany({
+    where: { userId },
+  });
+}
+
 // ==================== Subscription Management ====================
 
 /**
@@ -92,18 +118,35 @@ async function notifyUser(user, message, link) {
  * @returns {Promise<void>}
  */
 async function saveSubscription(userId, subscription) {
-  await userService.saveSubscription(userId, subscription);
+  const existing = await prisma.subscription.findFirst({
+    where: { userId },
+  });
+  
+  if (existing) {
+    await prisma.subscription.update({
+      where: { id: existing.id },
+      data: { subscription },
+    });
+  } else {
+    await prisma.subscription.create({
+      data: { userId, subscription },
+    });
+  }  
 }
 
 // ==================== Notification Retrieval ====================
 
+
 /**
- * Fetch all notifications for a user
+ * Get all notifications for a user
  * @param {number} userId - User ID
  * @returns {Promise<Array>} Array of notification objects
  */
-async function fetchNotifications(userId) {
-  return await userService.getNotifications(userId);
+async function fetchNotifications(userId) { 
+  return await prisma.notification.findMany({
+    where: { userId: Number(userId) },
+    orderBy: { id: "desc" } // Latest first
+  });
 }
 
 /**
@@ -111,8 +154,13 @@ async function fetchNotifications(userId) {
  * @param {number} notificationId - Notification ID
  * @returns {Promise<Object>} Updated notification object
  */
-async function markNotificationRead(notificationId) {
-  return await userService.markNotificationRead(notificationId);
+async function markNotificationRead(userId) {
+  return await prisma.notification.updateMany({
+    where: { 
+      userId,
+      read: false },
+    data: { read: true },
+  });
 }
 
 // ==================== Exports ====================

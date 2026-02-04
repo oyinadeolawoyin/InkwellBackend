@@ -33,7 +33,19 @@ const validateForm = [
     .withMessage("Password must contain at least one special character."),
 ];
 
-router.post("/signup", validateForm, authController.signup);
+const { validationResult } = require("express-validator");
+
+router.post("/signup", validateForm, (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    // Return an array of messages
+    const errorMessages = errors.array().map(err => err.msg);
+    return res.status(400).json({ errors: errorMessages });
+  }
+
+  authController.signup(req, res);
+});
+
 router.post("/login", authController.login);
 router.post("/logout", authController.logout);
 router.get("/me", authenticateJWT, authController.getMe);

@@ -1,10 +1,12 @@
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -23,6 +25,7 @@ model User {
   writingPlan    WritingPlan?
   weeklyProgress WeeklyProgress[]
   quoteLikes     QuoteLike[]
+  notification   Notification[]
 }
 
 model Project {
@@ -126,6 +129,30 @@ model QuoteLike {
 
   @@unique([userId, quoteId]) // 🚫 prevents double-like
 }
+
+model Subscription {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  subscription Json
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Notification {
+  id         Int      @id @default(autoincrement())
+  username   String
+  userId     Int
+  message    String?
+  link       String?
+  read       Boolean? @default(false)
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, read])
+}
+
 
 enum Role {
   USER

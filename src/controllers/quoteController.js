@@ -1,5 +1,5 @@
 const quoteService = require("../services/quoteService");
-
+const userService = require("../services/userService");
 
 /**
  * Create a new quote and notify all users
@@ -22,7 +22,7 @@ async function createQuote(req, res) {
     });
 
     // 2. Fetch all users
-    const users = await fetchUsers();
+    const users = await userService.fetchUsers();
 
     // 3. Notify all users (don't wait - run in background)
     if (users && users.length > 0) {

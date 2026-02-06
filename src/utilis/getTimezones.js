@@ -1,4 +1,4 @@
-export default function getCurrentTimeInTimezone(timezone) {
+function getCurrentTimeInTimezone(timezone) {
     return new Intl.DateTimeFormat("en-GB", {
       timeZone: timezone,
       hour: "2-digit",
@@ -7,7 +7,12 @@ export default function getCurrentTimeInTimezone(timezone) {
     }).format(new Date());
 }  
 
-export default function timeToMinutes(timeStr) {
+function timeToMinutes(timeStr) {
     const [hours, minutes] = timeStr.split(":").map(Number);
     return hours * 60 + minutes;
 }  
+
+module.exports = {
+  getCurrentTimeInTimezone,
+  timeToMinutes
+}

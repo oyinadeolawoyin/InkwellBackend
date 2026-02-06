@@ -1,7 +1,7 @@
 const cron = require("node-cron");
-const prisma = require("../config/prismaClient");
-const { notifyUser } = require("../services/notificationService");
-const { getCurrentTimeInTimezone, timeToMinutes } = require("../utilis/getTimezones");
+const prisma = require("../src/config/prismaClient");
+const { notifyUser } = require("../src/services/notificationService");
+const { getCurrentTimeInTimezone, timeToMinutes } = require("../src/utilis/getTimezones");
 
 const dayMap = {
   0: { goal: "sundayGoal", time: "sundayTime", label: "Sunday" },

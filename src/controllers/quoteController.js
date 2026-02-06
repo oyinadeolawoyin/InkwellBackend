@@ -1,16 +1,56 @@
 const quoteService = require("../services/quoteService");
 
+
+/**
+ * Create a new quote and notify all users
+ * @route POST /api/quote
+ * @access Admin only
+ */
 async function createQuote(req, res) {
   const { title, content } = req.body;
 
+  // Validation
+  if (!content || !content.trim()) {
+    return res.status(400).json({ message: "Quote content is required" });
+  }
+
   try {
-    const quote = await quoteService.createQuote({ title, content });
-    res.status(201).json({ quote });
+    // 1. Create the quote
+    const quote = await quoteService.createQuote({ 
+      title: title || "Quote of the day", 
+      content: content.trim() 
+    });
+
+    // 2. Fetch all users
+    const users = await fetchUsers();
+
+    // 3. Notify all users (don't wait - run in background)
+    if (users && users.length > 0) {
+      const message = `New daily quote: "${content.substring(0, 50)}${content.length > 50 ? '...' : ''}"`;
+      const link = "/";
+
+      // Send notifications in background
+      users.forEach(user => {
+        notifyUser(user, message, link).catch(err => {
+          console.error(`Failed to notify user ${user.id}:`, err);
+        });
+      });
+
+      console.log(`Sending notifications to ${users.length} users...`);
+    }
+
+    // 4. Return success immediately
+    res.status(201).json({ 
+      quote,
+      message: `Quote created successfully. Notifying ${users.length} users...`
+    });
+
   } catch (error) {
     console.error("Create quote error:", error);
     res.status(500).json({ message: "Something went wrong. Please try again later." });
   }
 }
+
 
 async function updateQuote(req, res) {
   const { title, content } = req.body;

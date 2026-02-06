@@ -4,7 +4,7 @@ const app = express();
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const multer = require("multer");
-// require('./cronJobs');
+require("./jobs/writingPlanReminder.job");
 
 const authRoutes = require("./src/routes/authRoutes");
 const writingRoutes = require("./src/routes/writingPlanRoutes");

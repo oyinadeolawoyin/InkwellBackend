@@ -1,6 +1,6 @@
 const quoteService = require("../services/quoteService");
 const userService = require("../services/userService");
-
+const { notifyUser } = require("../services/notificationService");
 /**
  * Create a new quote and notify all users
  * @route POST /api/quote

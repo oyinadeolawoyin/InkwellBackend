@@ -43,7 +43,7 @@ async function createUser({
         username,
         password,
         email,
-        timezone,
+        timezone: timezone?.trim(),
         role: role || "USER" 
       }
     });

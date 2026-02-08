@@ -35,6 +35,7 @@ async function createUser({
     username, 
     password, 
     email, 
+    timezone,
     role 
   }) {
     return await prisma.user.create({
@@ -42,6 +43,7 @@ async function createUser({
         username,
         password,
         email,
+        timezone,
         role: role || "USER" 
       }
     });

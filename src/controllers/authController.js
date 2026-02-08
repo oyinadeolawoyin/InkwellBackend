@@ -44,7 +44,7 @@ async function signup(req, res) {
     });
   }
 
-  const { username, password, email } = req.body;
+  const { username, password, email, timezone } = req.body;
 
   try {
     // Check if email already exists
@@ -71,6 +71,7 @@ async function signup(req, res) {
       username,
       password: hashedPassword,
       email,
+      timezone,
       role: isPremiumEligible ? "FOUNDING_WRITER" : "USER" // FOUNDING WRITER = Premium forever
     });
 

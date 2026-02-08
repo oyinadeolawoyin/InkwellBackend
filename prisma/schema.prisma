@@ -25,6 +25,7 @@ model User {
   weeklyProgress WeeklyProgress[]
   quoteLikes     QuoteLike[]
   notification   Notification[]
+  sentReminders  SentReminder[] 
 }
 
 model Project {
@@ -152,6 +153,19 @@ model Notification {
   @@index([userId, read])
 }
 
+model SentReminder {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  date      DateTime // Normalized date (00:00:00)
+  day       String   // "Monday", "Tuesday", etc.
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, date, day]) // One reminder per user per day
+  @@index([userId])
+  @@index([date])
+}
 
 enum Role {
   USER

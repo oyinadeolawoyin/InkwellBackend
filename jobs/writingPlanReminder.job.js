@@ -88,15 +88,34 @@ function getMotivationalMessage(user, goal, currentTime) {
   return relevantMessages[Math.floor(Math.random() * relevantMessages.length)];
 }
 
-cron.schedule("*/5 * * * *", async () => {
+console.log("📝 Writing Plan Reminder Job: Initializing...");
+
+const task = cron.schedule("*/5 * * * *", async () => {
+  console.log("\n🔄 Writing Plan Reminder Job: Running at", new Date().toISOString());
+  
   try {
     const plans = await prisma.writingPlan.findMany({
       include: { user: true }
     });
 
+    console.log(`📋 Found ${plans.length} writing plan(s)`);
+
+    if (plans.length === 0) {
+      console.log("⚠️  No writing plans found in database");
+      return;
+    }
+
     for (const plan of plans) {
       const user = plan.user;
-      if (!user?.timezone) continue;
+      
+      console.log(`\n👤 Processing plan for user: ${user?.username || user?.id}`);
+      
+      if (!user?.timezone) {
+        console.log(`  ⚠️  User ${user?.id} has no timezone set - skipping`);
+        continue;
+      }
+
+      console.log(`  🌍 User timezone: ${user.timezone}`);
 
       const now = new Date();
       const weekdayIndex = new Date(
@@ -104,18 +123,33 @@ cron.schedule("*/5 * * * *", async () => {
       ).getDay();
 
       const { goal, time, label } = dayMap[weekdayIndex];
-      if (!plan[goal] || !plan[time]) continue;
+      console.log(`  📅 Today is ${label} (index: ${weekdayIndex})`);
+      console.log(`  🎯 Goal field: ${goal}, Time field: ${time}`);
+      console.log(`  📊 Plan goal: ${plan[goal]}, Plan time: ${plan[time]}`);
 
-      const currentTime = getCurrentTimeInTimezone(user.timezone); // "HH:mm"
+      if (!plan[goal] || !plan[time]) {
+        console.log(`  ⏭️  No goal or time set for ${label} - skipping`);
+        continue;
+      }
+
+      const currentTime = getCurrentTimeInTimezone(user.timezone);
       const currentMinutes = timeToMinutes(currentTime);
       const scheduledMinutes = timeToMinutes(plan[time]);
 
-      // ✅ Check if current time has passed scheduled time (and we're within same day)
-      if (currentMinutes < scheduledMinutes) continue;
+      console.log(`  ⏰ Current time: ${currentTime} (${currentMinutes} minutes)`);
+      console.log(`  ⏰ Scheduled time: ${plan[time]} (${scheduledMinutes} minutes)`);
+      console.log(`  📏 Difference: ${currentMinutes - scheduledMinutes} minutes`);
+
+      if (currentMinutes < scheduledMinutes) {
+        console.log(`  ⏭️  Current time (${currentTime}) is before scheduled time (${plan[time]}) - skipping`);
+        continue;
+      }
 
       // Normalize date
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+
+      console.log(`  📆 Checking if already sent for date: ${today.toISOString()}`);
 
       // Check if already notified
       const alreadySent = await prisma.sentReminder.findUnique({
@@ -128,22 +162,52 @@ cron.schedule("*/5 * * * *", async () => {
         }
       });
 
-      if (alreadySent) continue;
+      if (alreadySent) {
+        console.log(`  ✅ Already sent reminder for ${label} - skipping`);
+        continue;
+      }
 
-      // ✅ Send notification
+      console.log(`  🔔 Sending notification...`);
+
+      // Send notification
       const message = getMotivationalMessage(user, plan[goal], currentTime);
-      await notifyUser(user, message, "/dashboard/writing-plan");
+      
+      try {
+        await notifyUser(user, message, "/dashboard/writing-plan");
+        console.log(`  ✅ Notification sent successfully`);
+      } catch (notifyError) {
+        console.error(`  ❌ Failed to send notification:`, notifyError);
+        throw notifyError;
+      }
 
       // Record reminder
-      await prisma.sentReminder.create({
-        data: {
-          userId: user.id,
-          date: today,
-          day: label
-        }
-      });
+      try {
+        await prisma.sentReminder.create({
+          data: {
+            userId: user.id,
+            date: today,
+            day: label
+          }
+        });
+        console.log(`  ✅ Reminder record created`);
+      } catch (recordError) {
+        console.error(`  ❌ Failed to record reminder:`, recordError);
+        throw recordError;
+      }
     }
+    
+    console.log("\n✅ Writing Plan Reminder Job: Completed successfully");
   } catch (error) {
-    console.error("Writing plan reminder job failed:", error);
+    console.error("\n❌ Writing plan reminder job failed:", error);
+    console.error("Stack trace:", error.stack);
   }
 });
+
+// Verify the cron job is scheduled
+if (task) {
+  console.log("✅ Writing Plan Reminder Job: Successfully scheduled (runs every 5 minutes)");
+} else {
+  console.error("❌ Writing Plan Reminder Job: Failed to schedule!");
+}
+
+module.exports = task;

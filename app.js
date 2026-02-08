@@ -4,7 +4,11 @@ const app = express();
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const multer = require("multer");
+
+console.log("🚀 Starting application...");
+console.log("📝 Loading writing plan reminder job...");
 require("./jobs/writingPlanReminder.job");
+console.log("✅ Writing plan reminder job loaded");
 
 const authRoutes = require("./src/routes/authRoutes");
 const writingRoutes = require("./src/routes/writingPlanRoutes");
@@ -35,7 +39,6 @@ const corsOptions = {
   credentials: true,
 };
 
-
 // Enable CORS globally
 app.use(cors(corsOptions));
 
@@ -48,14 +51,17 @@ app.use("/api/progress", writingProgressRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/quote", quoteRoutes);
-app.use("/api/notifications", notificationRoutes)
+app.use("/api/notifications", notificationRoutes);
 
 app.use((err, req, res, next) => {
-    if (err instanceof multer.MulterError || err.message === "Unsupported file type") {
+  if (err instanceof multer.MulterError || err.message === "Unsupported file type") {
     return res.status(400).json({ message: err.message });
-    }
-    res.status(500).json({ message: err.message });
+  }
+  res.status(500).json({ message: err.message });
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`⏰ Cron jobs are now active`);
+});

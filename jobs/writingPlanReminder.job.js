@@ -173,7 +173,7 @@ const task = cron.schedule("*/1 * * * *", async () => {
       const message = getMotivationalMessage(user, plan[goal], currentTime);
       
       try {
-        await notifyUser(user, message, "/inkwellinky.vercel.app/dashboard");
+        await notifyUser(user, message, "/dashboard");
         console.log(`  ✅ Notification sent successfully`);
       } catch (notifyError) {
         console.error(`  ❌ Failed to send notification:`, notifyError);

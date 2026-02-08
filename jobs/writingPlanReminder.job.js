@@ -107,13 +107,11 @@ cron.schedule("*/5 * * * *", async () => {
       if (!plan[goal] || !plan[time]) continue;
 
       const currentTime = getCurrentTimeInTimezone(user.timezone); // "HH:mm"
+      const currentMinutes = timeToMinutes(currentTime);
+      const scheduledMinutes = timeToMinutes(plan[time]);
 
-      const diff = Math.abs(
-        timeToMinutes(currentTime) - timeToMinutes(plan[time])
-      );
-
-      // ±2 minutes tolerance
-      if (diff > 2) continue;
+      // ✅ Check if current time has passed scheduled time (and we're within same day)
+      if (currentMinutes < scheduledMinutes) continue;
 
       // Normalize date
       const today = new Date();
@@ -132,9 +130,8 @@ cron.schedule("*/5 * * * *", async () => {
 
       if (alreadySent) continue;
 
-      // ✅ Pass currentTime to message generator
+      // ✅ Send notification
       const message = getMotivationalMessage(user, plan[goal], currentTime);
-
       await notifyUser(user, message, "/dashboard/writing-plan");
 
       // Record reminder

@@ -4,11 +4,7 @@ const app = express();
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const multer = require("multer");
-
-console.log("🚀 Starting application...");
-console.log("📝 Loading writing plan reminder job...");
 require("./jobs/writingPlanReminder.job");
-console.log("✅ Writing plan reminder job loaded");
 
 const authRoutes = require("./src/routes/authRoutes");
 const writingRoutes = require("./src/routes/writingPlanRoutes");

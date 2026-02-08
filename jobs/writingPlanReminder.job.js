@@ -90,7 +90,7 @@ function getMotivationalMessage(user, goal, currentTime) {
 
 console.log("📝 Writing Plan Reminder Job: Initializing...");
 
-const task = cron.schedule("*/5 * * * *", async () => {
+const task = cron.schedule("*/1 * * * *", async () => {
   console.log("\n🔄 Writing Plan Reminder Job: Running at", new Date().toISOString());
   
   try {

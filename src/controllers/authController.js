@@ -39,9 +39,9 @@ async function signup(req, res) {
   // Validate request body
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    return res.status(400).json({
-      message: errors.array().map(err => err.msg)
-    });
+    // Return a single string message instead of array
+    const errorMessages = errors.array().map(err => err.msg).join(" ");
+    return res.status(400).json({ message: errorMessages });
   }
 
   const { username, password, email, timezone } = req.body;

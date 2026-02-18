@@ -1,15 +1,12 @@
 require("dotenv").config();
 const userService = require("../services/userService");
-// const fileUploader = require("../utilis/fileUploader");
+const fileUploader = require("../utilis/fileUploader");
 
 async function updateUser(req, res) {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ message: errors.array() });
-    }
-  
+  console.log("jjjjjjjjjjjj")
     try {
       const { username, email, bio } = req.body;
+      console.log("username", username, "emial", email, "bio", bio);
       const userId = Number(req.user.id);
       const file = req.file;
   
@@ -53,7 +50,7 @@ async function updateUser(req, res) {
     } catch (error) {
       console.error("Update user error:", error);
       res.status(500).json({
-        message: error.message || "Something went wrong. Please try again.",
+        message: "Something went wrong. Please try again.",
       });
     }
 }  
@@ -69,6 +66,7 @@ async function fetchUsers(req, res) {
 }
 
 async function fetchUser(req, res) {
+  console.log("what's up?")
     const userId = req.params.userId;
     try {
         const user = await userService.fetchUser(Number(userId));
@@ -91,7 +89,7 @@ async function deleteUser(req, res) {
 }
 
 module.exports = {
-    // updateUser,
+    updateUser,
     fetchUsers,
     fetchUser,
     deleteUser

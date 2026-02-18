@@ -49,23 +49,41 @@ async function createUser({
     });
 }
 
-async function updateUser({ 
+async function updateUser({
   userId,
-  username,  
-  email, 
+  username,
+  email,
   bio,
-  avartar
+  avartar,
 }) {
-  return await prisma.user.update({
+  const existingUser = await prisma.user.findUnique({
     where: { id: userId },
-    data: {
-      username,
-      email,
-      bio,
-      avartar
-    },
+    select: { username: true, email: true },
+  });
+console.log("exist", existingUser);
+  if (!existingUser) {
+    throw new Error("User not found");
+  }
+
+  const data = {};
+
+  if (username && username !== existingUser.username) {
+    data.username = username;
+  }
+
+  if (email && email !== existingUser.email) {
+    data.email = email;
+  }
+
+  if (bio !== undefined) data.bio = bio;
+  if (avartar !== undefined) data.avatar = avartar;
+
+  return prisma.user.update({
+    where: { id: userId },
+    data,
   });
 }
+
 
 /**
  * Fetch all users

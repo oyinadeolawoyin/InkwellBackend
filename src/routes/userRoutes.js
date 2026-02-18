@@ -5,6 +5,6 @@ const { authenticateJWT } = require("../config/jwt");
 
 router.get("/", userController.fetchUsers);
 router.get("/:userId/user", userController.fetchUser);
-// router.post("/updateUser", authenticateJWT, userController.updateUser);
+router.post("/updateUser", authenticateJWT, userController.updateUser);
 
 module.exports = router;

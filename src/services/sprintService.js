@@ -338,6 +338,7 @@ async function fetchSprintOfTheDay({ skip, take }) {
         prisma.sprint.findMany({
             where: {
                 isActive: false,
+                groupSprintId: null, 
                 completedAt: {
                     gte: start,
                     lt: end

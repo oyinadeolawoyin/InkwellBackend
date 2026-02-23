@@ -1,11 +1,147 @@
 const prisma = require("../config/prismaClient");
 
-async function startSprint(userId, duration, checkin) {
+async function startGroupSprint(userId, duration, sprintPurpose) {
+    return prisma.groupSprint.create({
+        data: {
+            userId,
+            duration,
+            groupPurpose: sprintPurpose
+        }
+    })
+}
+
+async function fetchGroupSprint(groupSprintId) {
+    return prisma.groupSprint.findFirst({
+        where: { id: groupSprintId },
+        include: {
+            sprints: {
+                include: {
+                    user: {
+                        select: {
+                            username: true,
+                            avatar: true
+                        }
+                    },
+                    _count: {
+                        select: { likes: true }
+                    }
+                }
+            },
+            _count: {
+                select: { sprints: true }
+            },
+            user: {
+                select: {
+                    username: true,
+                    avatar: true
+                }
+            }
+        }
+    })
+}
+
+
+async function fetchAllActiveGroupSprints({ take, skip }) {
+    const [groupSprints, total] = await prisma.$transaction([
+        prisma.groupSprint.findMany({
+            where: { isActive: true },
+            skip,
+            take,
+            orderBy: { startedAt: "desc" },
+            include: {
+                user: {
+                    select: {
+                        username: true,
+                        avatar: true
+                    }
+                },
+                sprints: {
+                    select: {
+                        userId: true,
+                        user: {
+                            select: {
+                                username: true,
+                                avatar: true
+                            }
+                        }
+                    }
+                },
+                _count: {
+                    select: { sprints: true }
+                }
+            }
+        }),
+        prisma.groupSprint.count({
+            where: { isActive: true }
+        })
+    ]);
+
+    return {
+        groupSprints,
+        total
+    };
+}
+
+async function endGroupSprint(thankyouNote, groupSprintId) {
+    return await prisma.groupSprint.update({
+        where: { id: groupSprintId },
+        data: {
+            groupThankNote: thankyouNote,
+            completedAt: new Date(),
+            isActive: false,
+        }
+    });
+}
+
+async function fetchGroupSprintOfTheDay({ skip, take }) {
+    const { start, end } = getTodayRange();
+
+    const [groupSprints, total] = await prisma.$transaction([
+        prisma.groupSprint.findMany({
+            where: {
+                isActive: false,
+                completedAt: {
+                    gte: start,
+                    lt: end
+                }
+            },
+            include: {
+                user: {
+                    select: {
+                        username: true,
+                        avatar: true
+                    }
+                },
+                _count: {
+                    select: { sprints: true }
+                }
+            },
+            orderBy: { completedAt: "desc" },
+            skip,
+            take,
+        }),
+        prisma.groupSprint.count({
+            where: {
+                isActive: false,
+                completedAt: {
+                    gte: start,
+                    lt: end
+                }
+            }
+        })
+    ]);
+
+    return { groupSprints, total };
+}
+
+async function startSprint(userId, duration, checkin, groupSprintId, intro) {
     return prisma.sprint.create({
         data: {
             userId,
             duration,
-            checkin
+            checkin,
+            ...(groupSprintId && { groupSprintId }), // only adds it if it's provided
+            intro
         }
     })
 }
@@ -46,7 +182,6 @@ async function fetchActiveSprint({ skip, take }) {
     };
 }
 
-
 async function fetchLoginUserSprint(userId) {
     return prisma.sprint.findFirst({
         where: { userId, isActive: true },
@@ -62,7 +197,6 @@ async function fetchLoginUserSprint(userId) {
 }
 
 async function endSprint(sprintId, wordsWritten, checkout) {
-    // 1. End the sprint
     const sprint = await prisma.sprint.update({
         where: { id: sprintId },
         data: {
@@ -74,17 +208,71 @@ async function endSprint(sprintId, wordsWritten, checkout) {
         }
     });
 
-    // 2. AUTO-CHECK TODAY IN WEEKLY PROGRESS
     await checkOffToday(sprint.userId);
 
     return sprint;
+}
+
+// NEW: toggle like on a sprint — works exactly like toggleLikeQuote
+async function toggleLikeSprint({ userId, sprintId }) {
+    return prisma.$transaction(async (tx) => {
+        const existingLike = await tx.sprintLike.findUnique({
+            where: {
+                userId_sprintId: {
+                    userId,
+                    sprintId
+                }
+            }
+        });
+
+        let liked;
+
+        if (existingLike) {
+            await tx.sprintLike.delete({
+                where: {
+                    userId_sprintId: {
+                        userId,
+                        sprintId
+                    }
+                }
+            });
+            liked = false;
+        } else {
+            await tx.sprintLike.create({
+                data: {
+                    userId,
+                    sprintId
+                }
+            });
+            liked = true;
+        }
+
+        // Count likes after toggle
+        const likesCount = await tx.sprintLike.count({
+            where: { sprintId }
+        });
+
+        return { liked, likesCount };
+    });
+}
+
+// NEW: check if a user liked a sprint (used to show liked state on page load)
+async function checkUserSprintLike(userId, sprintId) {
+    return prisma.sprintLike.findUnique({
+        where: {
+            userId_sprintId: {
+                userId,
+                sprintId
+            }
+        }
+    });
 }
 
 // Helper function to check off today
 async function checkOffToday(userId) {
     const today = new Date();
     const weekStart = getStartOfWeek(today);
-    const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon, etc.
+    const dayOfWeek = today.getDay();
     
     const dayMap = [
         'sundayDone',
@@ -96,7 +284,6 @@ async function checkOffToday(userId) {
         'saturdayDone'
     ];
     
-    // Get or create this week's progress
     await prisma.weeklyProgress.upsert({
         where: {
             userId_weekStart: {
@@ -107,10 +294,10 @@ async function checkOffToday(userId) {
         create: {
             userId,
             weekStart,
-            [dayMap[dayOfWeek]]: true  //Check today
+            [dayMap[dayOfWeek]]: true
         },
         update: {
-            [dayMap[dayOfWeek]]: true  //Check today
+            [dayMap[dayOfWeek]]: true
         }
     });
 }
@@ -118,7 +305,7 @@ async function checkOffToday(userId) {
 function getStartOfWeek(date) {
     const d = new Date(date);
     const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
     const monday = new Date(d.setDate(diff));
     monday.setHours(0, 0, 0, 0);
     return monday;
@@ -169,6 +356,9 @@ async function fetchSprintOfTheDay({ skip, take }) {
                         username: true,
                         avatar: true
                     }
+                },
+                _count: {
+                    select: { likes: true }
                 }
             },
             orderBy: { completedAt: "desc" },
@@ -197,11 +387,18 @@ async function fetchSprintDays(userId) {
 }
 
 module.exports = {
+    startGroupSprint,
+    fetchGroupSprint,
+    fetchAllActiveGroupSprints,
+    endGroupSprint,
+    fetchGroupSprintOfTheDay,
     startSprint,
     pauseSprint,
     fetchActiveSprint,
     fetchLoginUserSprint,
     endSprint,
+    toggleLikeSprint,
+    checkUserSprintLike,
     fetchSprintOfTheDay,
     fetchSprintDays
 }

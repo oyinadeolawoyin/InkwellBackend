@@ -21,6 +21,8 @@ model User {
   
   projects       Project[]
   sprints        Sprint[]
+  sprintLikes   SprintLike[]   
+  groupSprint    GroupSprint[]
   writingPlan    WritingPlan?
   weeklyProgress WeeklyProgress[]
   quoteLikes     QuoteLike[]
@@ -41,18 +43,18 @@ model Project {
   @@index([userId])
 }
 
-model Sprint {
-  id           Int       @id @default(autoincrement())
-  userId       Int
-  duration     Int       // minutes
-  checkin      String?
-  checkout     String?
-  wordsWritten Int       @default(0) // User reports this
-  startedAt    DateTime  @default(now())
-  completedAt  DateTime?
-  isActive     Boolean   @default(true)
-  isPause      Boolean   @default(false)
+model GroupSprint {
+  id                 Int       @id @default(autoincrement())
+  userId             Int
+  duration           Int       // minutes
+  groupPurpose       String?
+  groupThankNote     String?
+  startedAt          DateTime  @default(now())
+  completedAt        DateTime?
+  isActive           Boolean   @default(true)
   
+  sprints            Sprint[]
+
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   @@index([userId])
@@ -60,6 +62,40 @@ model Sprint {
   @@index([startedAt])
 }
 
+model Sprint {
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  groupSprintId Int?
+
+  intro         String?
+  duration      Int       // minutes
+  checkin       String?
+  checkout      String?
+  wordsWritten  Int       @default(0) // User reports this
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+  isActive      Boolean   @default(true)
+  isPause       Boolean   @default(false)
+
+  likes         SprintLike[]  
+  
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  groupSprint   GroupSprint? @relation(fields: [groupSprintId], references: [id], onDelete: SetNull)
+  
+  @@index([userId])
+  @@index([isActive])
+  @@index([startedAt])
+}
+
+model SprintLike {
+  id        Int    @id @default(autoincrement())
+  userId    Int
+  sprintId  Int
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sprint    Sprint @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sprintId])
+}
 
 model WritingPlan {
   id            Int  @id @default(autoincrement())

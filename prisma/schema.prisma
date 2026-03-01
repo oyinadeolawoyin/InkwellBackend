@@ -18,6 +18,9 @@ model User {
   role           Role             @default(USER)
   createdAt      DateTime         @default(now())
   timezone       String           @default("UTC")
+  resetToken      String?        @unique
+  resetTokenExpiry DateTime?
+
   
   projects       Project[]
   sprints        Sprint[]

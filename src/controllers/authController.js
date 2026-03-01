@@ -204,7 +204,7 @@ async function forgetPassword(req, res) {
         await authService.saveResetToken(user.id, resetToken, resetTokenExpiry);
 
         // Create password reset link (frontend route)
-        const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+        const resetLink = `inkwellinky.vercel.app/reset-password?token=${resetToken}`;
 
         // Send password reset email
         await sendEmail(

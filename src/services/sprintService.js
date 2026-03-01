@@ -134,14 +134,15 @@ async function fetchGroupSprintOfTheDay({ skip, take }) {
     return { groupSprints, total };
 }
 
-async function startSprint(userId, duration, checkin, groupSprintId, intro) {
+async function startSprint(userId, duration, checkin, groupSprintId, intro, startWordCount) {
     return prisma.sprint.create({
         data: {
             userId,
             duration,
             checkin,
             ...(groupSprintId && { groupSprintId }), // only adds it if it's provided
-            intro
+            intro,
+            startWordCount: startWordCount || 0
         }
     })
 }
@@ -196,11 +197,21 @@ async function fetchLoginUserSprint(userId) {
     })
 }
 
-async function endSprint(sprintId, wordsWritten, checkout) {
+async function endSprint(sprintId, endWordCount, checkout) {
+    const existing = await prisma.sprint.findUnique({
+        where: { id: sprintId },
+        select: { startWordCount: true }
+    });
+
+    const wordsWritten = endWordCount != null
+        ? Math.max(0, endWordCount - (existing?.startWordCount ?? 0))
+        : 0;
+
     const sprint = await prisma.sprint.update({
         where: { id: sprintId },
         data: {
-            wordsWritten: wordsWritten || 0,
+            endWordCount: endWordCount ?? null,
+            wordsWritten,
             checkout: checkout || null,
             completedAt: new Date(),
             isActive: false,
@@ -387,6 +398,13 @@ async function fetchSprintDays(userId) {
     });
 }
 
+async function updateWordsDirectly(sprintId, wordsWritten) {
+    return prisma.sprint.update({
+        where: { id: sprintId },
+        data: { wordsWritten }
+    });
+}
+
 module.exports = {
     startGroupSprint,
     fetchGroupSprint,
@@ -401,5 +419,6 @@ module.exports = {
     toggleLikeSprint,
     checkUserSprintLike,
     fetchSprintOfTheDay,
-    fetchSprintDays
+    fetchSprintDays,
+    updateWordsDirectly
 }

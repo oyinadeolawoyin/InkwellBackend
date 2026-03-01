@@ -71,7 +71,9 @@ model Sprint {
   duration      Int       // minutes
   checkin       String?
   checkout      String?
-  wordsWritten  Int       @default(0) // User reports this
+  startWordCount Int      @default(0)
+  endWordCount  Int?
+  wordsWritten  Int       @default(0) // Computed: endWordCount - startWordCount
   startedAt     DateTime  @default(now())
   completedAt   DateTime?
   isActive      Boolean   @default(true)

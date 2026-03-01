@@ -128,6 +128,20 @@ async function deleteUser(userId) {
 }
 
 
+async function fetchFoundingWriters() {
+  return await prisma.user.findMany({
+    where: { role: "FOUNDING_WRITER" },
+    select: {
+      id: true,
+      username: true,
+      avatar: true,
+      bio: true,
+      createdAt: true,
+    },
+    orderBy: { id: "asc" },
+  });
+}
+
 // ==================== Exports ====================
 
 module.exports = {
@@ -137,4 +151,5 @@ module.exports = {
   fetchUsers,
   fetchUser,
   deleteUser,
+  fetchFoundingWriters,
 };

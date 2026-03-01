@@ -20,5 +20,6 @@ router.get("/:groupSprintId", authenticateJWT, sprintController.fetchGroupSprint
 router.post("/startGroupSprint", authenticateJWT, sprintController.startGroupSprint);
 router.post("/:groupSprintId/endGroupSprint", authenticateJWT, sprintController.endGroupSprint);
 router.post("/:sprintId/like", authenticateJWT, sprintController.likeSprint);
+router.post("/:sprintId/words", authenticateJWT, sprintController.updateWordsDirectly);
 
 module.exports = router;

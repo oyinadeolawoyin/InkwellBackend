@@ -66,7 +66,6 @@ async function fetchUsers(req, res) {
 }
 
 async function fetchUser(req, res) {
-  console.log("what's up?")
     const userId = req.params.userId;
     try {
         const user = await userService.fetchUser(Number(userId));
@@ -88,9 +87,20 @@ async function deleteUser(req, res) {
     }
 }
 
+async function fetchFoundingWriters(req, res) {
+  try {
+    const users = await userService.fetchFoundingWriters();
+    res.status(200).json({ users });
+  } catch (error) {
+    console.error("Fetch founding writers error:", error);
+    res.status(500).json({ message: error.message || "Something went wrong. Please try again." });
+  }
+}
+
 module.exports = {
     updateUser,
     fetchUsers,
     fetchUser,
-    deleteUser
+    deleteUser,
+    fetchFoundingWriters,
 }

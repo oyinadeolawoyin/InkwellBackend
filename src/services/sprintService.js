@@ -1,4 +1,5 @@
 const prisma = require("../config/prismaClient");
+const { checkActiveMissions } = require("../utilis/missionUtils");
 
 async function startGroupSprint(userId, duration, sprintPurpose) {
     return prisma.groupSprint.create({
@@ -200,28 +201,41 @@ async function fetchLoginUserSprint(userId) {
 async function endSprint(sprintId, endWordCount, checkout) {
     const existing = await prisma.sprint.findUnique({
         where: { id: sprintId },
-        select: { startWordCount: true }
+        select: { startWordCount: true, userId: true, duration: true }
     });
 
     const wordsWritten = endWordCount != null
         ? Math.max(0, endWordCount - (existing?.startWordCount ?? 0))
         : 0;
 
-    const sprint = await prisma.sprint.update({
-        where: { id: sprintId },
-        data: {
-            endWordCount: endWordCount ?? null,
-            wordsWritten,
-            checkout: checkout || null,
-            completedAt: new Date(),
-            isActive: false,
-            isPause: false
-        }
-    });
+    const userId = existing.userId;
+    const duration = existing.duration;
 
-    await checkOffToday(sprint.userId);
+    const [sprint] = await prisma.$transaction([
+        prisma.sprint.update({
+            where: { id: sprintId },
+            data: {
+                endWordCount: endWordCount ?? null,
+                wordsWritten,
+                checkout: checkout || null,
+                completedAt: new Date(),
+                isActive: false,
+                isPause: false
+            }
+        }),
+        prisma.user.update({
+            where: { id: userId },
+            data: {
+                totalWordsWritten: { increment: wordsWritten }
+            }
+        })
+    ]);
 
-    return sprint;
+    await checkOffToday(userId);
+
+    const completedMissions = await checkActiveMissions(userId, { wordsWritten, duration });
+
+    return { ...sprint, completedMissions };
 }
 
 // NEW: toggle like on a sprint — works exactly like toggleLikeQuote
@@ -398,11 +412,49 @@ async function fetchSprintDays(userId) {
     });
 }
 
-async function updateWordsDirectly(sprintId, wordsWritten) {
-    return prisma.sprint.update({
-        where: { id: sprintId },
-        data: { wordsWritten }
+async function fetchRecentUserSprints(userId) {
+    return prisma.sprint.findMany({
+        where: { userId, isActive: false },
+        orderBy: { completedAt: "desc" },
+        take: 5,
+        select: {
+            id: true,
+            wordsWritten: true,
+            duration: true,
+            checkin: true,
+            checkout: true,
+            startedAt: true,
+            completedAt: true,
+            _count: { select: { likes: true } }
+        }
     });
+}
+
+async function updateWordsDirectly(sprintId, wordsWritten) {
+    const existing = await prisma.sprint.findUnique({
+        where: { id: sprintId },
+        select: { userId: true, duration: true, wordsWritten: true }
+    });
+
+    const userId = existing.userId;
+    const duration = existing.duration;
+    const wordsDiff = Math.max(0, wordsWritten - (existing.wordsWritten ?? 0));
+
+    const [sprint] = await prisma.$transaction([
+        prisma.sprint.update({
+            where: { id: sprintId },
+            data: { wordsWritten }
+        }),
+        prisma.user.update({
+            where: { id: userId },
+            data: { totalWordsWritten: { increment: wordsDiff } }
+        })
+    ]);
+
+    await checkOffToday(userId);
+    const completedMissions = await checkActiveMissions(userId, { wordsWritten, duration });
+
+    return { ...sprint, completedMissions };
 }
 
 module.exports = {
@@ -420,5 +472,6 @@ module.exports = {
     checkUserSprintLike,
     fetchSprintOfTheDay,
     fetchSprintDays,
-    updateWordsDirectly
+    updateWordsDirectly,
+    fetchRecentUserSprints
 }

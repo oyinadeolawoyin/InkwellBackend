@@ -9,28 +9,33 @@ datasource db {
 }
 
 model User {
-  id             Int              @id @default(autoincrement())
-  username       String           @unique
-  email          String           @unique
-  password       String
-  avatar         String?
-  bio            String?
-  role           Role             @default(USER)
-  createdAt      DateTime         @default(now())
-  timezone       String           @default("UTC")
-  resetToken      String?        @unique
-  resetTokenExpiry DateTime?
+  id                 Int              @id @default(autoincrement())
+  username           String           @unique
+  email              String           @unique
+  password           String
+  avatar             String?
+  bio                String?
+  role               Role             @default(USER)
+  createdAt          DateTime         @default(now())
+  timezone           String           @default("UTC")
+  resetToken         String?          @unique
+  resetTokenExpiry   DateTime?
+  totalWordsWritten  Int              @default(0)
+  totalXp            Int              @default(0)
+  rank               String           @default("Inklings")
+  pendingRank        String?
 
-  
-  projects       Project[]
-  sprints        Sprint[]
-  sprintLikes   SprintLike[]   
-  groupSprint    GroupSprint[]
-  writingPlan    WritingPlan?
-  weeklyProgress WeeklyProgress[]
-  quoteLikes     QuoteLike[]
-  notification   Notification[]
-  sentReminders  SentReminder[] 
+  projects           Project[]
+  sprints            Sprint[]
+  sprintLikes        SprintLike[]
+  groupSprint        GroupSprint[]
+  writingPlan        WritingPlan?
+  weeklyProgress     WeeklyProgress[]
+  quoteLikes         QuoteLike[]
+  notification       Notification[]
+  sentReminders      SentReminder[]
+  userMissions       UserMission[]
+  activeMissions     UserActiveMission[]
 }
 
 model Project {
@@ -213,4 +218,61 @@ enum Role {
   ADMIN
   SPONSOR
   FOUNDING_WRITER
+}
+
+enum MissionType {
+  SPRINT_WORDS
+  TOTAL_WORDS
+  SPRINT_COUNT
+  SPRINT_DURATION
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+model Mission {
+  id            Int         @id @default(autoincrement())
+  title         String      @unique
+  description   String
+  type          MissionType
+  requirement   Int
+  difficulty    Difficulty
+  xp            Int         @default(0)
+  createdAt     DateTime    @default(now())
+
+  userMissions  UserMission[]
+  activeMissions UserActiveMission[]
+
+  @@index([difficulty])
+}
+
+model UserMission {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  missionId   Int
+  completedAt DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mission     Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, missionId])
+  @@index([userId])
+}
+
+model UserActiveMission {
+  id          Int        @id @default(autoincrement())
+  userId      Int
+  missionId   Int
+  difficulty  Difficulty
+  progress    Int        @default(0)
+  assignedAt  DateTime   @default(now())
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mission     Mission    @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, difficulty])
+  @@index([userId])
 }

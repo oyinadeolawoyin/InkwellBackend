@@ -9,6 +9,7 @@ router.get("/activeGroupSprints", sprintController.fecthAllActiveGroupSprints); 
 router.get("/GroupSprintsOfTheDay", sprintController.fetchGroupSprintsOfTheDay); //public route;
 
 router.get("/:userId/sprintDays", sprintController.fetchSprintDays); //This is for the days users had sprinted
+router.get("/:userId/recent", sprintController.recentUserSprints); // Last 5 completed sprints for a user
 router.get("/loginUserSession", authenticateJWT, sprintController.loginUserSession); //This is to get the log in user session
 
 router.post("/startSprint", authenticateJWT, sprintController.startSprint);

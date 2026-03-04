@@ -170,19 +170,21 @@ async function endSprint(req, res) {
     const sprintId = req.params.sprintId;
 
     try {
-        const sprint = await sprintService.endSprint(
+        const result = await sprintService.endSprint(
             Number(sprintId),
             endWordCount != null ? Number(endWordCount) : null,
             checkout
         );
 
+        const { completedMissions, ...sprint } = result;
+
         const user = req.user;
         const message = "Your writing sprint has come to an end. Take a breath and be proud of the words you showed up for today. Every line counts 🌱";
         const link = `https://inkwellinky.vercel.app/dashboard`;
-        
+
         await notifyUser(user, message, link);
 
-        res.status(200).json({ sprint });
+        res.status(200).json({ sprint, completedMissions });
     } catch(error) {
         console.error("Sprint end error:", error);
         res.status(500).json({ message: "Something went wrong. Please try again later." });
@@ -238,13 +240,25 @@ async function fetchSprintDays(req, res) {
     }
 }
 
+async function recentUserSprints(req, res) {
+    const userId = Number(req.params.userId);
+    try {
+        const sprints = await sprintService.fetchRecentUserSprints(userId);
+        res.status(200).json({ sprints });
+    } catch (error) {
+        console.error("Fetch recent sprints error:", error);
+        res.status(500).json({ message: "Something went wrong. Please try again later." });
+    }
+}
+
 async function updateWordsDirectly(req, res) {
     const sprintId = Number(req.params.sprintId);
     const { wordsWritten } = req.body;
 
     try {
-        const sprint = await sprintService.updateWordsDirectly(sprintId, Number(wordsWritten));
-        res.status(200).json({ sprint });
+        const result = await sprintService.updateWordsDirectly(sprintId, Number(wordsWritten));
+        const { completedMissions, ...sprint } = result;
+        res.status(200).json({ sprint, completedMissions });
     } catch(error) {
         console.error("Update words directly error:", error);
         res.status(500).json({ message: "Something went wrong. Please try again later." });
@@ -265,5 +279,6 @@ module.exports = {
     likeSprint,
     sprintOfTheDay,
     fetchSprintDays,
-    updateWordsDirectly
+    updateWordsDirectly,
+    recentUserSprints
 }

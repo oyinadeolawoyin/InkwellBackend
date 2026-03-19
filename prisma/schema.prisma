@@ -9,162 +9,155 @@ datasource db {
 }
 
 model User {
-  id                 Int              @id @default(autoincrement())
-  username           String           @unique
-  email              String           @unique
-  password           String
-  avatar             String?
-  bio                String?
-  role               Role             @default(USER)
-  createdAt          DateTime         @default(now())
-  timezone           String           @default("UTC")
-  resetToken         String?          @unique
-  resetTokenExpiry   DateTime?
-  totalWordsWritten  Int              @default(0)
-  totalXp            Int              @default(0)
-  rank               String           @default("Inklings")
-  pendingRank        String?
+  id               Int       @id @default(autoincrement())
+  username         String    @unique
+  email            String    @unique
+  password         String
+  avatar           String?
+  bio              String?
+  role             Role      @default(USER)
+  createdAt        DateTime  @default(now())
+  timezone         String    @default("UTC")
+  resetToken       String?   @unique
+  resetTokenExpiry DateTime?
 
-  projects           Project[]
+  groupSprints       GroupSprint[]
   sprints            Sprint[]
-  sprintLikes        SprintLike[]
-  groupSprint        GroupSprint[]
-  writingPlan        WritingPlan?
-  weeklyProgress     WeeklyProgress[]
-  quoteLikes         QuoteLike[]
   notification       Notification[]
-  sentReminders      SentReminder[]
-  userMissions       UserMission[]
-  activeMissions     UserActiveMission[]
+  quoteLikes         QuoteLike[]
   blogPostLikes      BlogPostLike[]
   blogComments       BlogComment[]
   blogReplies        BlogReply[]
+  writingSnippets    WritingSnippet[]
+  snippetLikes       SnippetLike[]
+  snippetComments    SnippetComment[]
+  snippetReplies     SnippetReply[]
 }
 
-model Project {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  title       String   // "The Dragon's Oath"
-  description String?  // "Fantasy trilogy, book 1"
-  link        String   // Google Docs link
-  createdAt   DateTime @default(now())
-  
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@index([userId])
-}
+// ─── GROUP SPRINT ─────────────────────────────────────────────
 
 model GroupSprint {
-  id                 Int       @id @default(autoincrement())
-  userId             Int
-  duration           Int       // minutes
-  groupPurpose       String?
-  groupThankNote     String?
-  startedAt          DateTime  @default(now())
-  completedAt        DateTime?
-  isActive           Boolean   @default(true)
-  
-  sprints            Sprint[]
+  id             Int       @id @default(autoincrement())
+  userId         Int
+  duration       Int
+  groupPurpose   String?
+  groupThankNote String?
+  soundscape     String?   // e.g. "rain", "birds", "cafe"
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+  isActive       Boolean   @default(true)
 
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  sprints        Sprint[]
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@index([isActive])
   @@index([startedAt])
 }
 
+// Stripped down — only tracks who is inside a group sprint
 model Sprint {
-  id            Int       @id @default(autoincrement())
+  id            Int          @id @default(autoincrement())
   userId        Int
   groupSprintId Int?
-
-  intro         String?
-  duration      Int       // minutes
   checkin       String?
-  checkout      String?
-  startWordCount Int      @default(0)
-  endWordCount  Int?
-  wordsWritten  Int       @default(0) // Computed: endWordCount - startWordCount
-  startedAt     DateTime  @default(now())
+  startWords    Int
+  wordsWritten  Int          @default(0)
+  startedAt     DateTime     @default(now())
   completedAt   DateTime?
-  isActive      Boolean   @default(true)
-  isPause       Boolean   @default(false)
+  isActive      Boolean      @default(true)
 
-  likes         SprintLike[]  
-  
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   groupSprint   GroupSprint? @relation(fields: [groupSprintId], references: [id], onDelete: SetNull)
-  
+
   @@index([userId])
+  @@index([groupSprintId])
   @@index([isActive])
-  @@index([startedAt])
 }
 
-model SprintLike {
-  id        Int    @id @default(autoincrement())
+// ─── WEEKLY SESSION SCHEDULE ──────────────────────────────────
+
+model SessionSchedule {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  dayOfWeek   Int      // 0=Sun, 1=Mon ... 6=Sat
+  time        String   // "HH:mm" UTC
+  timezone    String   @default("UTC")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([dayOfWeek])
+  @@index([isActive])
+}
+
+// ─── WRITING SNIPPET ──────────────────────────────────────────
+
+model WritingSnippet {
+  id         Int           @id @default(autoincrement())
+  userId     Int
+  content    String
+  proudOf    String?
+  struggle   String?
+  sourceType SnippetSource @default(POST_SPRINT)
+  createdAt  DateTime      @default(now())
+
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  likes      SnippetLike[]
+  comments   SnippetComment[]
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([sourceType])
+}
+
+model SnippetLike {
+  id        Int            @id @default(autoincrement())
   userId    Int
-  sprintId  Int
-  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sprint    Sprint @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+  snippetId Int
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  snippet   WritingSnippet @relation(fields: [snippetId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, sprintId])
+  @@unique([userId, snippetId])
+  @@index([snippetId])
 }
 
-model WritingPlan {
-  id            Int  @id @default(autoincrement())
-  userId        Int  @unique
-  
-  // Recurring goals (template)
-  mondayGoal    Int? // null = skip, 0 = no goal, 500 = word goal
-  tuesdayGoal   Int?
-  wednesdayGoal Int?
-  thursdayGoal  Int?
-  fridayGoal    Int?
-  saturdayGoal  Int?
-  sundayGoal    Int?
+model SnippetComment {
+  id        Int            @id @default(autoincrement())
+  userId    Int
+  snippetId Int
+  content   String
+  createdAt DateTime       @default(now())
 
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  snippet   WritingSnippet @relation(fields: [snippetId], references: [id], onDelete: Cascade)
+  replies   SnippetReply[]
 
-  // Preferred writing time (HH:mm)
-  mondayTime    String?
-  tuesdayTime   String?
-  wednesdayTime String?
-  thursdayTime  String?
-  fridayTime    String?
-  saturdayTime  String?
-  sundayTime    String?
-  
-  user          User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  @@index([snippetId])
   @@index([userId])
 }
 
-model WeeklyProgress {
-  id              Int      @id @default(autoincrement())
-  userId          Int
-  weekStart       DateTime // Monday of this week (e.g., Jan 27, 2025)
-  
-  // Checkmarks for THIS WEEK ONLY
-  mondayDone      Boolean  @default(false)
-  tuesdayDone     Boolean  @default(false)
-  wednesdayDone   Boolean  @default(false)
-  thursdayDone    Boolean  @default(false)
-  fridayDone      Boolean  @default(false)
-  saturdayDone    Boolean  @default(false)
-  sundayDone      Boolean  @default(false)
-  
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@unique([userId, weekStart]) // One record per user per week
+model SnippetReply {
+  id        Int            @id @default(autoincrement())
+  userId    Int
+  commentId Int
+  content   String
+  createdAt DateTime       @default(now())
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment   SnippetComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@index([commentId])
   @@index([userId])
-  @@index([weekStart])
 }
+
+// ─── EXISTING MODELS (KEPT) ───────────────────────────────────
 
 model Quote {
-  id        Int      @id @default(autoincrement())
+  id        Int         @id @default(autoincrement())
   title     String?
   content   String
-  createdAt DateTime @default(now())
-
+  createdAt DateTime    @default(now())
   likes     QuoteLike[]
 }
 
@@ -172,11 +165,10 @@ model QuoteLike {
   id      Int   @id @default(autoincrement())
   userId  Int
   quoteId Int
-
   user    User  @relation(fields: [userId], references: [id])
   quote   Quote @relation(fields: [quoteId], references: [id])
 
-  @@unique([userId, quoteId]) // 🚫 prevents double-like
+  @@unique([userId, quoteId])
 }
 
 model Subscription {
@@ -189,44 +181,29 @@ model Subscription {
 }
 
 model Notification {
-  id         Int      @id @default(autoincrement())
-  username   String
-  userId     Int
-  message    String?
-  link       String?
-  read       Boolean? @default(false)
-  createdAt  DateTime @default(now())
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        Int      @id @default(autoincrement())
+  username  String
+  userId    Int
+  message   String?
+  link      String?
+  read      Boolean? @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([userId, read])
 }
 
-model SentReminder {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  date      DateTime // Normalized date (00:00:00)
-  day       String   // "Monday", "Tuesday", etc.
-  createdAt DateTime @default(now())
-  
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@unique([userId, date, day]) // One reminder per user per day
-  @@index([userId])
-  @@index([date])
-}
-
 model BlogPost {
-  id        Int      @id @default(autoincrement())
+  id        Int            @id @default(autoincrement())
   title     String?
   content   String
   mediaUrl  String?
   link      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  likes    BlogPostLike[]
-  comments BlogComment[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  likes     BlogPostLike[]
+  comments  BlogComment[]
 
   @@index([createdAt])
 }
@@ -235,42 +212,41 @@ model BlogPostLike {
   id         Int      @id @default(autoincrement())
   userId     Int
   blogPostId Int
-
-  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  post BlogPost @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post       BlogPost @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
 
   @@unique([userId, blogPostId])
   @@index([blogPostId])
 }
 
 model BlogComment {
-  id         Int      @id @default(autoincrement())
+  id         Int         @id @default(autoincrement())
   blogPostId Int
   authorId   Int
   content    String
-  createdAt  DateTime @default(now())
-
-  post    BlogPost    @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
-  author  User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  replies BlogReply[]
+  createdAt  DateTime    @default(now())
+  post       BlogPost    @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+  author     User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replies    BlogReply[]
 
   @@index([blogPostId])
   @@index([authorId])
 }
 
 model BlogReply {
-  id        Int      @id @default(autoincrement())
+  id        Int         @id @default(autoincrement())
   commentId Int
   authorId  Int
   content   String
-  createdAt DateTime @default(now())
-
-  comment BlogComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  author  User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+  comment   BlogComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  author    User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
   @@index([commentId])
   @@index([authorId])
 }
+
+// ─── ENUMS ────────────────────────────────────────────────────
 
 enum Role {
   USER
@@ -279,59 +255,7 @@ enum Role {
   FOUNDING_WRITER
 }
 
-enum MissionType {
-  SPRINT_WORDS
-  TOTAL_WORDS
-  SPRINT_COUNT
-  SPRINT_DURATION
-}
-
-enum Difficulty {
-  EASY
-  MEDIUM
-  HARD
-}
-
-model Mission {
-  id            Int         @id @default(autoincrement())
-  title         String      @unique
-  description   String
-  type          MissionType
-  requirement   Int
-  difficulty    Difficulty
-  xp            Int         @default(0)
-  createdAt     DateTime    @default(now())
-
-  userMissions  UserMission[]
-  activeMissions UserActiveMission[]
-
-  @@index([difficulty])
-}
-
-model UserMission {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  missionId   Int
-  completedAt DateTime @default(now())
-
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mission     Mission  @relation(fields: [missionId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, missionId])
-  @@index([userId])
-}
-
-model UserActiveMission {
-  id          Int        @id @default(autoincrement())
-  userId      Int
-  missionId   Int
-  difficulty  Difficulty
-  progress    Int        @default(0)
-  assignedAt  DateTime   @default(now())
-
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mission     Mission    @relation(fields: [missionId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, difficulty])
-  @@index([userId])
+enum SnippetSource {
+  POST_SPRINT
+  STANDALONE
 }

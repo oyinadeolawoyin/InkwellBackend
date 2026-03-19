@@ -7,14 +7,11 @@ const multer = require("multer");
 require("./jobs/writingPlanReminder.job");
 
 const authRoutes = require("./src/routes/authRoutes");
-const writingRoutes = require("./src/routes/writingPlanRoutes");
 const sprintRoutes = require("./src/routes/sprintRoutes");
-const writingProgressRoutes = require("./src/routes/writingProgressRoutes");
 const projectRoutes = require("./src/routes/projectRoutes");
 const userRoutes = require("./src/routes/userRoutes");
 const quoteRoutes = require("./src/routes/quoteRoutes");
 const notificationRoutes = require("./src/routes/notificationRoutes");
-const missionRoutes = require("./src/routes/missionRoutes");
 const blogRoutes = require("./src/routes/blogRoutes");
 
 app.use(express.json());
@@ -44,14 +41,11 @@ app.use(cors(corsOptions));
 app.use(cookieParser());
 
 app.use("/api/auth", authRoutes);
-app.use("/api/writingPlan", writingRoutes);
 app.use("/api/sprint", sprintRoutes);
-app.use("/api/progress", writingProgressRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/quote", quoteRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/missions", missionRoutes);
 app.use("/api/blog", blogRoutes);
 
 app.use((err, req, res, next) => {

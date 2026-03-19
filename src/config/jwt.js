@@ -30,7 +30,20 @@ function authenticateJWT(req, res, next) {
 }
 
 
+function optionalJWT(req, res, next) {
+    const token = req.cookies?.token;
+    if (!token) return next();
+
+    try {
+        req.user = jwt.verify(token, secret);
+    } catch (_) {
+        // invalid token — proceed as unauthenticated
+    }
+    next();
+}
+
 module.exports = {
     generateToken,
-    authenticateJWT
+    authenticateJWT,
+    optionalJWT
 }

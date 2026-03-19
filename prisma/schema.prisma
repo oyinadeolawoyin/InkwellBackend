@@ -36,6 +36,9 @@ model User {
   sentReminders      SentReminder[]
   userMissions       UserMission[]
   activeMissions     UserActiveMission[]
+  blogPostLikes      BlogPostLike[]
+  blogComments       BlogComment[]
+  blogReplies        BlogReply[]
 }
 
 model Project {
@@ -211,6 +214,62 @@ model SentReminder {
   @@unique([userId, date, day]) // One reminder per user per day
   @@index([userId])
   @@index([date])
+}
+
+model BlogPost {
+  id        Int      @id @default(autoincrement())
+  title     String?
+  content   String
+  mediaUrl  String?
+  link      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  likes    BlogPostLike[]
+  comments BlogComment[]
+
+  @@index([createdAt])
+}
+
+model BlogPostLike {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  blogPostId Int
+
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post BlogPost @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, blogPostId])
+  @@index([blogPostId])
+}
+
+model BlogComment {
+  id         Int      @id @default(autoincrement())
+  blogPostId Int
+  authorId   Int
+  content    String
+  createdAt  DateTime @default(now())
+
+  post    BlogPost    @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+  author  User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replies BlogReply[]
+
+  @@index([blogPostId])
+  @@index([authorId])
+}
+
+model BlogReply {
+  id        Int      @id @default(autoincrement())
+  commentId Int
+  authorId  Int
+  content   String
+  createdAt DateTime @default(now())
+
+  comment BlogComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  author  User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([commentId])
+  @@index([authorId])
 }
 
 enum Role {

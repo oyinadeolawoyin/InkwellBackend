@@ -1,4 +1,3 @@
-const fs = require('fs/promises');
 const { supabase } = require('../config/supabaseClient');
 const path = require('path');
 
@@ -110,16 +109,13 @@ async function deleteFiles(publicUrls) {
 
 async function uploadFile(file) {
   try {
-    console.log("Reading file from temp path:", file.path);
-    const fileBuffer = await fs.readFile(file.path);
-
     const sanitizedName = sanitizeFilename(file.originalname);
     const supabasePath = `uploads/${Date.now()}_${sanitizedName}`;
 
     console.log("Uploading to Supabase at path:", supabasePath);
     const { data, error } = await supabase.storage
       .from('inkwell')
-      .upload(supabasePath, fileBuffer, {
+      .upload(supabasePath, file.buffer, {
         contentType: file.mimetype,
       });
 
@@ -131,12 +127,6 @@ async function uploadFile(file) {
 
     const publicUrl = publicUrlData.publicUrl;
     console.log("Public URL generated:", publicUrl);
-
-    try {
-      await fs.unlink(file.path);
-    } catch (unlinkErr) {
-      console.error('Failed to delete temp file:', unlinkErr);
-    }
 
     return publicUrl;
   } catch (err) {

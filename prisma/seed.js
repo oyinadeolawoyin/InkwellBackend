@@ -121,6 +121,43 @@ const missions = [
     }
 ];
 
+async function assignActiveMissions(userId) {
+    const existing = await prisma.userActiveMission.findMany({ where: { userId } });
+    const existingDifficulties = new Set(existing.map(m => m.difficulty));
+    const difficulties = ["EASY", "MEDIUM", "HARD"];
+
+    for (const difficulty of difficulties) {
+        if (existingDifficulties.has(difficulty)) continue;
+
+        const completedMissions = await prisma.userMission.findMany({
+            where: { userId },
+            select: { missionId: true }
+        });
+        const completedIds = completedMissions.map(m => m.missionId);
+
+        const available = await prisma.mission.findMany({
+            where: {
+                difficulty,
+                id: { notIn: completedIds.length > 0 ? completedIds : [-1] }
+            }
+        });
+
+        if (available.length === 0) continue;
+
+        let picked;
+        if (difficulty === "EASY") {
+            const firstMission = available.find(m => m.title === "Getting Started");
+            picked = firstMission ?? available[Math.floor(Math.random() * available.length)];
+        } else {
+            picked = available[Math.floor(Math.random() * available.length)];
+        }
+
+        await prisma.userActiveMission.create({
+            data: { userId, missionId: picked.id, difficulty }
+        });
+    }
+}
+
 async function main() {
     console.log("Seeding missions...");
 
@@ -139,6 +176,15 @@ async function main() {
     }
 
     console.log(`Seeded ${missions.length} missions successfully.`);
+
+    // Backfill missions for all existing users who don't have active missions yet
+    const users = await prisma.user.findMany({ select: { id: true, username: true } });
+    console.log(`Backfilling missions for ${users.length} existing users...`);
+    for (const user of users) {
+        await assignActiveMissions(user.id);
+        console.log(`  Assigned missions to user: ${user.username}`);
+    }
+    console.log("Backfill complete.");
 }
 
 main()

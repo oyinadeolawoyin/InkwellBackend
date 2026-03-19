@@ -24,6 +24,7 @@ model User {
   groupSprints       GroupSprint[]
   sprints            Sprint[]
   notification       Notification[]
+  projects           Project[]
   quoteLikes         QuoteLike[]
   blogPostLikes      BlogPostLike[]
   blogComments       BlogComment[]
@@ -32,6 +33,24 @@ model User {
   snippetLikes       SnippetLike[]
   snippetComments    SnippetComment[]
   snippetReplies     SnippetReply[]
+  wallPostsAuthored   WallPost[]        @relation("WallPostAuthor")
+  wallPostsReceived   WallPost[]        @relation("WallPostProfile")
+  wallPostLikes       WallPostLike[]
+  wallPostComments    WallPostComment[]
+  wallPostReplies     WallPostReply[]
+}
+
+model Project {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  title       String
+  description String?
+  link        String
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // ─── GROUP SPRINT ─────────────────────────────────────────────
@@ -40,8 +59,7 @@ model GroupSprint {
   id             Int       @id @default(autoincrement())
   userId         Int
   duration       Int
-  groupPurpose   String?
-  groupThankNote String?
+  totalWordsWritten Int @default(0)
   soundscape     String?   // e.g. "rain", "birds", "cafe"
   startedAt      DateTime  @default(now())
   completedAt    DateTime?
@@ -61,8 +79,9 @@ model Sprint {
   userId        Int
   groupSprintId Int?
   checkin       String?
-  startWords    Int
+  startWords    Int          @default(0)
   wordsWritten  Int          @default(0)
+  deletedWords  Int          @default(0)
   startedAt     DateTime     @default(now())
   completedAt   DateTime?
   isActive      Boolean      @default(true)
@@ -100,15 +119,15 @@ model WritingSnippet {
   proudOf    String?
   struggle   String?
   sourceType SnippetSource @default(POST_SPRINT)
+  tags       String? // e.g. "pacing,dialogue,worldbuilding" — comma separated
   createdAt  DateTime      @default(now())
-
+  
   user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   likes      SnippetLike[]
   comments   SnippetComment[]
 
   @@index([userId])
   @@index([createdAt])
-  @@index([sourceType])
 }
 
 model SnippetLike {
@@ -244,6 +263,62 @@ model BlogReply {
 
   @@index([commentId])
   @@index([authorId])
+}
+
+model WallPost {
+  id          Int           @id @default(autoincrement())
+  authorId    Int           // who wrote the post
+  profileId   Int           // whose wall it's on
+  content     String
+  createdAt   DateTime      @default(now())
+
+  author      User          @relation("WallPostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  profile     User          @relation("WallPostProfile", fields: [profileId], references: [id], onDelete: Cascade)
+  likes       WallPostLike[]
+  comments    WallPostComment[]
+
+  @@index([profileId])
+  @@index([authorId])
+}
+
+model WallPostLike {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  wallPostId Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallPost   WallPost @relation(fields: [wallPostId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, wallPostId])
+  @@index([wallPostId])
+}
+
+model WallPostComment {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  wallPostId Int
+  content    String
+  createdAt  DateTime @default(now())
+
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallPost   WallPost        @relation(fields: [wallPostId], references: [id], onDelete: Cascade)
+  replies    WallPostReply[]
+
+  @@index([wallPostId])
+  @@index([userId])
+}
+
+model WallPostReply {
+  id        Int             @id @default(autoincrement())
+  userId    Int
+  commentId Int
+  content   String
+  createdAt DateTime        @default(now())
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment   WallPostComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@index([commentId])
+  @@index([userId])
 }
 
 // ─── ENUMS ────────────────────────────────────────────────────

@@ -1,37 +1,37 @@
+const { check } = require("express-validator");
 const prisma = require("../config/prismaClient");
 
 // ─── GROUP SPRINT ─────────────────────────────────────────────
 
 async function startGroupSprint(userId, duration, soundscape) {
-    return prisma.groupSprint.create({
+    // With LiveKit, rooms are created automatically when participants join
+    // We just need to store a unique room name derived from the sprint id
+    // We'll update it after creation using the sprint's id
+    const groupSprint = await prisma.groupSprint.create({
         data: {
             userId,
             duration,
-            soundscape: soundscape || null
+            soundscape: soundscape || null,
+            // roomName will be set after we have the id
         }
+    });
+
+    // Now set the liveKitRoomName using the sprint id
+    return prisma.groupSprint.update({
+        where: { id: groupSprint.id },
+        data: { liveKitRoomName: `sprint-${groupSprint.id}` }
     });
 }
 
-async function endGroupSprint(groupSprintId, thankyouNote) {
-    // Get all completed sprints in this group sprint
-    const sprints = await prisma.sprint.findMany({
-        where: {
-            groupSprintId,
-            isActive: false
-        },
-        select: { wordsWritten: true }
-    });
-
-    // Add up all members' words written
-    const totalWordsWritten = sprints.reduce((sum, s) => sum + (s.wordsWritten || 0), 0);
-
+async function endGroupSprint(groupSprintId) {
+    // Only close the GROUP sprint room — do NOT touch individual member sprints.
+    // Members still need to check out and enter their word counts after this.
+    // totalWordsWritten is updated incrementally as each member checks out.
     return prisma.groupSprint.update({
         where: { id: groupSprintId },
         data: {
-            groupThankNote: thankyouNote || null,
             completedAt: new Date(),
             isActive: false,
-            totalWordsWritten
         }
     });
 }
@@ -106,6 +106,7 @@ async function fetchLastGroupSprint() {
         orderBy: { completedAt: "desc" },
         include: {
             sprints: {
+                orderBy: { wordsWritten: "desc" },
                 include: {
                     user: {
                         select: {
@@ -130,8 +131,16 @@ async function fetchLastGroupSprint() {
 
 // ─── SPRINT (joining a group sprint) ─────────────────────────
 
-// Member joins a group sprint — saves what they're working on and their starting word count
+// Member joins a group sprint — saves what they're working on and their starting word count.
+// If the user already has an active sprint in this room (e.g. they left and came back),
+// return the existing sprint instead of creating a duplicate.
 async function joinSprint(userId, groupSprintId, checkin, startWords) {
+    const existing = await prisma.sprint.findFirst({
+        where: { userId, groupSprintId, isActive: true }
+    });
+
+    if (existing) return existing;
+    
     return prisma.sprint.create({
         data: {
             userId,
@@ -145,17 +154,17 @@ async function joinSprint(userId, groupSprintId, checkin, startWords) {
 async function checkoutSprint(sprintId, currentWordCount) {
     const existing = await prisma.sprint.findUnique({
         where: { id: sprintId },
-        select: { startWords: true, userId: true }
+        select: { startWords: true, userId: true, groupSprintId: true }
     });
 
     if (!existing) throw new Error("Sprint not found");
 
     const diff = currentWordCount - existing.startWords;
-
     const wordsWritten = diff > 0 ? diff : 0;
     const deletedWords = diff < 0 ? Math.abs(diff) : 0;
 
-    return prisma.sprint.update({
+    // Save this sprint's words and mark inactive
+    const sprint = await prisma.sprint.update({
         where: { id: sprintId },
         data: {
             wordsWritten,
@@ -164,6 +173,22 @@ async function checkoutSprint(sprintId, currentWordCount) {
             isActive: false
         }
     });
+
+    // Recalculate totalWordsWritten on the parent GroupSprint so homepage stays accurate
+    // This runs after every checkout so late checkouts are always included
+    if (existing.groupSprintId) {
+        const allSprints = await prisma.sprint.findMany({
+            where: { groupSprintId: existing.groupSprintId },
+            select: { wordsWritten: true }
+        });
+        const total = allSprints.reduce((sum, s) => sum + (s.wordsWritten || 0), 0);
+        await prisma.groupSprint.update({
+            where: { id: existing.groupSprintId },
+            data: { totalWordsWritten: total }
+        });
+    }
+
+    return sprint;
 }
 
 // Get the logged in user's active sprint

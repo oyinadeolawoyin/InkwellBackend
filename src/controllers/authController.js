@@ -6,7 +6,6 @@ const userService = require("../services/userService");
 const { validationResult } = require("express-validator");
 const crypto = require("crypto");
 const { sendEmail } = require("../config/mailer");
-const { assignActiveMissions } = require("../utilis/missionUtils");
 
 // ============================================
 // CONFIGURATION
@@ -76,9 +75,6 @@ async function signup(req, res) {
       role: isPremiumEligible ? "FOUNDING_WRITER" : "USER" // FOUNDING WRITER = Premium forever
     });
 
-    // Assign initial active missions for the new user
-    await assignActiveMissions(user.id);
-
     // Generate JWT and set secure cookie
     const token = jwt.generateToken(user);
     res.cookie("token", token, cookieOptions).status(201).json({
@@ -124,11 +120,6 @@ async function login(req, res) {
         if (!valid) {
             return res.status(401).json({ message: "Invalid password" });
         }
-
-        // Assign missions if user doesn't have any yet (covers existing users)
-        assignActiveMissions(user.id).catch(err =>
-            console.error("Mission assign on login error:", err)
-        );
 
         // Generate JWT and set secure cookie
         const token = jwt.generateToken(user);

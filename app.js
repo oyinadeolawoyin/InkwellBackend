@@ -7,12 +7,14 @@ const multer = require("multer");
 require("./jobs/writingPlanReminder.job");
 
 const authRoutes = require("./src/routes/authRoutes");
-const sprintRoutes = require("./src/routes/sprintRoutes");
+const groupSprintRoutes = require("./src/routes/groupSprintRoutes");
 const projectRoutes = require("./src/routes/projectRoutes");
 const userRoutes = require("./src/routes/userRoutes");
 const quoteRoutes = require("./src/routes/quoteRoutes");
 const notificationRoutes = require("./src/routes/notificationRoutes");
 const blogRoutes = require("./src/routes/blogRoutes");
+const snippetRoutes = require("./src/routes/snippetroutes");
+const scheduleRoutes = require("./src/routes/scheduleroutes");
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -41,12 +43,14 @@ app.use(cors(corsOptions));
 app.use(cookieParser());
 
 app.use("/api/auth", authRoutes);
-app.use("/api/sprint", sprintRoutes);
+app.use("/api/sprint", groupSprintRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/quote", quoteRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/blog", blogRoutes);
+app.use("/api/snippets", snippetRoutes);
+app.use("/api/schedule", scheduleRoutes);
 
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError || err.message === "Unsupported file type") {

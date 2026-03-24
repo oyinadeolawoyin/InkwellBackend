@@ -1,6 +1,7 @@
 require("dotenv").config();
 const groupSprintService = require("../services/groupSprintService");
 const { notifyUser } = require('../services/notificationService');
+const { AccessToken, TrackSource } = require("livekit-server-sdk");
 
 // ─── GROUP SPRINT ─────────────────────────────────────────────
 
@@ -18,11 +19,12 @@ async function startGroupSprint(req, res) {
 }
 
 async function endGroupSprint(req, res) {
-    const { thankyouNote } = req.body;
     const groupSprintId = Number(req.params.groupSprintId);
 
     try {
-        const groupSprint = await groupSprintService.endGroupSprint(groupSprintId, thankyouNote);
+      
+        const groupSprint = await groupSprintService.endGroupSprint(groupSprintId);
+     
 
         const user = req.user;
         const message = "You did great for arranging the sprint and helping others write. You should be proud of yourself 🌱";
@@ -79,7 +81,7 @@ async function fetchLastGroupSprint(req, res) {
         if (!groupSprint) {
             return res.status(404).json({ message: "No completed group sprint found" });
         }
-        res.status(200).json({ groupSprint });
+        res.status(200).json({ groupSprint }); console.log("gs", groupSprint);
     } catch (error) {
         console.error("Fetch last group sprint error:", error);
         res.status(500).json({ message: "Something went wrong. Please try again later." });
@@ -112,11 +114,19 @@ async function checkoutSprint(req, res) {
     const sprintId = Number(req.params.sprintId);
     const { currentWordCount } = req.body;
 
+    console.log("[checkout] sprintId:", req.params.sprintId, "→ parsed:", sprintId, "| currentWordCount:", currentWordCount);
+
+    // Guard — sprintId must be a valid number
+    if (!sprintId || isNaN(sprintId)) {
+        console.error("[checkout] Invalid sprintId received:", req.params.sprintId);
+        return res.status(400).json({ message: "Invalid sprint ID." });
+    }
+
     try {
         const sprint = await groupSprintService.checkoutSprint(
             sprintId,
             currentWordCount != null ? Number(currentWordCount) : 0
-        );
+        ); console.log("sprint", sprint);
 
         const user = req.user;
         const message = "Great job showing up and writing today. Every word counts 🌱";
@@ -124,7 +134,7 @@ async function checkoutSprint(req, res) {
 
         await notifyUser(user, message, link);
 
-        res.status(200).json({ sprint });
+        res.status(200).json({ sprint }); console.log("spr", sprint);
     } catch (error) {
         console.error("Checkout sprint error:", error);
         res.status(500).json({ message: "Something went wrong. Please try again later." });
@@ -142,6 +152,50 @@ async function fetchLoginUserSprint(req, res) {
     }
 }
 
+// ─── LIVEKIT TOKEN ────────────────────────────────────────────
+
+async function getLiveKitToken(req, res) {
+    const groupSprintId = Number(req.params.groupSprintId);
+
+    try {
+        const groupSprint = await groupSprintService.fetchGroupSprint(groupSprintId);
+
+        if (!groupSprint) {
+            return res.status(404).json({ message: "Group sprint not found" });
+        }
+        if (!groupSprint.liveKitRoomName) {
+            return res.status(400).json({ message: "No LiveKit room found for this sprint" });
+        }
+
+        // Safety check — catch missing env vars early with a clear message
+        if (!process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {
+            console.error("Missing LIVEKIT_API_KEY or LIVEKIT_API_SECRET in .env");
+            return res.status(500).json({ message: "LiveKit is not configured on the server." });
+        }
+
+        const at = new AccessToken(
+            process.env.LIVEKIT_API_KEY,
+            process.env.LIVEKIT_API_SECRET,
+            { identity: req.user.username, ttl: "2h" }
+        );
+
+        at.addGrant({
+            roomJoin: true,
+            room: groupSprint.liveKitRoomName,
+            canPublish: true,
+            canSubscribe: true,
+            canPublishSources: [TrackSource.SCREEN_SHARE],
+        });
+
+        const jwt = await at.toJwt(); // ✅ always await
+
+        res.status(200).json({ token: jwt, roomName: groupSprint.liveKitRoomName });
+    } catch (error) {
+        console.error("LiveKit token error:", error);
+        res.status(500).json({ message: "Something went wrong. Please try again later." });
+    }
+}
+
 module.exports = {
     startGroupSprint,
     endGroupSprint,
@@ -150,5 +204,6 @@ module.exports = {
     fetchLastGroupSprint,
     joinSprint,
     checkoutSprint,
-    fetchLoginUserSprint
+    fetchLoginUserSprint,
+    getLiveKitToken
 }

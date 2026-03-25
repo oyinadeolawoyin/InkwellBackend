@@ -2,6 +2,7 @@ require("dotenv").config();
 const groupSprintService = require("../services/groupSprintService");
 const { notifyUser } = require('../services/notificationService');
 const { AccessToken, TrackSource } = require("livekit-server-sdk");
+const { notifyGroupSprintStarted, notifyGroupSprintEnded } = require('../services/discordService');
 
 // ─── GROUP SPRINT ─────────────────────────────────────────────
 
@@ -11,6 +12,15 @@ async function startGroupSprint(req, res) {
 
     try {
         const groupSprint = await groupSprintService.startGroupSprint(userId, Number(duration), soundscape);
+
+        // 🔔 Ping Discord
+        await notifyGroupSprintStarted({
+            username: req.user.username,
+            duration,
+            soundscape,
+            groupSprintId: groupSprint.id
+        });
+
         res.status(201).json({ groupSprint });
     } catch (error) {
         console.error("Group sprint start error:", error);
@@ -22,15 +32,19 @@ async function endGroupSprint(req, res) {
     const groupSprintId = Number(req.params.groupSprintId);
 
     try {
-      
         const groupSprint = await groupSprintService.endGroupSprint(groupSprintId);
-     
 
         const user = req.user;
         const message = "You did great for arranging the sprint and helping others write. You should be proud of yourself 🌱";
         const link = `https://inkwellinky.vercel.app/group-sprint/${groupSprintId}`;
-
         await notifyUser(user, message, link);
+
+        // 🔔 Ping Discord
+        await notifyGroupSprintEnded({
+            username: req.user.username,
+            groupSprintId,
+            totalWordsWritten: groupSprint.totalWordsWritten
+        });
 
         res.status(200).json({ groupSprint });
     } catch (error) {

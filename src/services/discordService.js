@@ -1,9 +1,17 @@
+let lastDiscordPing = 0;
+const DISCORD_COOLDOWN_MS = 5000; // 5 seconds between pings
+
 async function sendDiscordMessage(embed) {
     const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
-    
-    console.log("🔔 Discord webhook URL:", webhookUrl ? "✅ Found" : "❌ undefined"); // add this
-
     if (!webhookUrl) return console.warn("No DISCORD_WEBHOOK_URL set");
+
+    // Rate limit guard
+    const now = Date.now();
+    if (now - lastDiscordPing < DISCORD_COOLDOWN_MS) {
+        console.warn("Discord ping skipped — too soon since last ping");
+        return;
+    }
+    lastDiscordPing = now;
 
     try {
         const res = await fetch(webhookUrl, {
@@ -11,7 +19,7 @@ async function sendDiscordMessage(embed) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ embeds: [embed] })
         });
-        console.log("Discord response status:", res.status); // add this
+        console.log("Discord response status:", res.status);
     } catch (error) {
         console.error("Discord notification error:", error);
     }

@@ -1,5 +1,3 @@
-require("dotenv").config();
-
 async function sendDiscordMessage(embed) {
     const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
     if (!webhookUrl) return console.warn("No DISCORD_WEBHOOK_URL set");

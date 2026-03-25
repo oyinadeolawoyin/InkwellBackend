@@ -1,13 +1,17 @@
 async function sendDiscordMessage(embed) {
     const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+    
+    console.log("🔔 Discord webhook URL:", webhookUrl ? "✅ Found" : "❌ undefined"); // add this
+
     if (!webhookUrl) return console.warn("No DISCORD_WEBHOOK_URL set");
 
     try {
-        await fetch(webhookUrl, {
+        const res = await fetch(webhookUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ embeds: [embed] })
         });
+        console.log("Discord response status:", res.status); // add this
     } catch (error) {
         console.error("Discord notification error:", error);
     }

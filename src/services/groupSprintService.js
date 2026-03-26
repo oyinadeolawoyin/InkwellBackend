@@ -24,9 +24,15 @@ async function startGroupSprint(userId, duration, soundscape) {
 }
 
 async function endGroupSprint(groupSprintId) {
-    // Only close the GROUP sprint room — do NOT touch individual member sprints.
-    // Members still need to check out and enter their word counts after this.
-    // totalWordsWritten is updated incrementally as each member checks out.
+    // Force-close any member sprints that never checked out (prevents stuck isActive: true rows)
+    await prisma.sprint.updateMany({
+        where: { groupSprintId, isActive: true },
+        data: {
+            completedAt: new Date(),
+            isActive: false,
+        }
+    });
+
     return prisma.groupSprint.update({
         where: { id: groupSprintId },
         data: {

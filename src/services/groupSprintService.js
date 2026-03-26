@@ -102,7 +102,10 @@ async function fetchAllActiveGroupSprints({ take, skip }) {
 // Returns the last completed group sprint — used to show results on homepage
 async function fetchLastGroupSprint() {
     return prisma.groupSprint.findFirst({
-        where: { isActive: false },
+        where: { 
+            isActive: false,
+            completedAt: { not: null } 
+        },
         orderBy: { completedAt: "desc" },
         include: {
             sprints: {

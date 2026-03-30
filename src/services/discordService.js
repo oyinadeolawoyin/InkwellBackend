@@ -18,20 +18,9 @@ async function sendDiscordMessage(embed) {
         });
 
         if (res.status === 429) {
-            const retryAfter = res.headers.get('retry-after');
-            const waitMs = retryAfter ? parseFloat(retryAfter) * 1000 : 2000;
-            console.warn(`Discord rate limited — retrying after ${waitMs}ms`);
-            
-            await new Promise(resolve => setTimeout(resolve, waitMs));
-            
-            // One retry
-            const retry = await fetch(webhookUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ embeds: [embed] })
-            });
-            console.log("Discord retry status:", retry.status);
-            return;
+            const body = await res.json();
+            console.warn("Discord rate limited — skipping. Body:", JSON.stringify(body));
+            return; // don't retry, just skip
         }
 
         console.log("Discord response status:", res.status);

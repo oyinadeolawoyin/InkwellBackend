@@ -1,3 +1,4 @@
+console.log("🔥 discordBot.js is running");
 const express = require("express");
 require("dotenv").config();
 require("./src/utilis/discordBot");

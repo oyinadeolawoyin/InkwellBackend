@@ -1,5 +1,6 @@
 const express = require("express");
 require("dotenv").config();
+require("./src/utilis/discordBot");
 const app = express();
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
@@ -62,5 +63,5 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`⏰ Cron jobs are now active`);
+  console.log(`bot is alive!`);
 });

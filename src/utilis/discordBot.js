@@ -10,6 +10,8 @@ client.once("ready", () => {
 
 client.login(process.env.DISCORD_BOT_TOKEN);
 
+console.log("TOKEN:", process.env.DISCORD_BOT_TOKEN ? "Loaded ✅" : "Missing ❌");
+
 // 👇 Better wait logic
 async function waitForReady() {
   if (client.isReady()) return;

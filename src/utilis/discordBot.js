@@ -9,11 +9,28 @@ client.once("ready", () => {
   console.log(`🤖 Bot logged in as ${client.user.tag}`);
 });
 
-client.login(process.env.DISCORD_BOT_TOKEN)
-  .then(() => console.log("🚀 Login attempt sent"))
-  .catch(err => console.error("❌ Login error:", err));
-
-console.log("TOKEN:", process.env.DISCORD_BOT_TOKEN ? "Loaded ✅" : "Missing ❌");
+async function loginWithRetry(retries = 5) {
+    try {
+      console.log("🔌 Attempting to connect to Discord...");
+      await client.login(process.env.DISCORD_BOT_TOKEN);
+      console.log("🚀 Login attempt sent");
+    } catch (err) {
+      console.error("❌ Login failed:", err.message);
+  
+      if (retries > 0) {
+        console.log(`🔄 Retrying in 5s... (${retries})`);
+        await new Promise(res => setTimeout(res, 5000));
+        return loginWithRetry(retries - 1);
+      } else {
+        console.error("💀 Could not connect to Discord");
+      }
+    }
+  }
+  
+  // ⏳ Delay before first login (VERY IMPORTANT)
+  setTimeout(() => {
+    loginWithRetry();
+  }, 5000);
 
 // 👇 Better wait logic
 async function waitForReady() {

@@ -2,16 +2,14 @@ let lastDiscordPing = 0;
 const DISCORD_COOLDOWN_MS = 5000; // 5 seconds between pings
 
 async function sendDiscordMessage(embed) {
-    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+    const webhookUrl = process.env.DISCORD_WEBHOOK_URL?.trim().replace(/^["']|["']$/g, '');
+    
     if (!webhookUrl) return console.warn("No DISCORD_WEBHOOK_URL set");
 
-    // Rate limit guard
-    const now = Date.now();
-    if (now - lastDiscordPing < DISCORD_COOLDOWN_MS) {
-        console.warn("Discord ping skipped — too soon since last ping");
-        return;
+    // Validate it's actually a URL before fetching
+    try { new URL(webhookUrl); } catch {
+        return console.error("DISCORD_WEBHOOK_URL is not a valid URL:", webhookUrl);
     }
-    lastDiscordPing = now;
 
     try {
         const res = await fetch(webhookUrl, {
@@ -19,6 +17,12 @@ async function sendDiscordMessage(embed) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ embeds: [embed] })
         });
+
+        if (res.status === 429) {
+            console.warn("Discord rate limited — skipping this ping");
+            return;
+        }
+
         console.log("Discord response status:", res.status);
     } catch (error) {
         console.error("Discord notification error:", error);

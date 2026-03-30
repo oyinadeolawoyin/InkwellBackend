@@ -4,20 +4,20 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-let isReady = false;
-
 client.once("ready", () => {
   console.log(`🤖 Bot logged in as ${client.user.tag}`);
-  isReady = true;
 });
 
 client.login(process.env.DISCORD_BOT_TOKEN);
 
+// 👇 Better wait logic
+async function waitForReady() {
+  if (client.isReady()) return;
+  await new Promise(resolve => client.once("ready", resolve));
+}
+
 async function sendBotMessage(channelId, embed) {
-  if (!isReady) {
-    console.warn("Bot not ready yet");
-    return;
-  }
+  await waitForReady();
 
   try {
     const channel = await client.channels.fetch(channelId);

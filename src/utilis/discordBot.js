@@ -8,7 +8,9 @@ client.once("ready", () => {
   console.log(`🤖 Bot logged in as ${client.user.tag}`);
 });
 
-client.login(process.env.DISCORD_BOT_TOKEN);
+client.login(process.env.DISCORD_BOT_TOKEN)
+  .then(() => console.log("🚀 Login attempt sent"))
+  .catch(err => console.error("❌ Login error:", err));
 
 console.log("TOKEN:", process.env.DISCORD_BOT_TOKEN ? "Loaded ✅" : "Missing ❌");
 

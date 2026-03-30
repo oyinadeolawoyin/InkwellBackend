@@ -1,6 +1,3 @@
-let lastDiscordPing = 0;
-const DISCORD_COOLDOWN_MS = 5000; // 5 seconds between pings
-
 async function sendDiscordMessage(embed) {
     const webhookUrl = process.env.DISCORD_WEBHOOK_URL?.trim().replace(/^["']|["']$/g, '');
     
@@ -18,9 +15,8 @@ async function sendDiscordMessage(embed) {
         });
 
         if (res.status === 429) {
-            const body = await res.json();
-            console.warn("Discord rate limited — skipping. Body:", JSON.stringify(body));
-            return; // don't retry, just skip
+            console.warn("Discord rate limited — skipping");
+            return;
         }
 
         console.log("Discord response status:", res.status);

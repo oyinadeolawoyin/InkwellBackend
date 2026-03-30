@@ -6,7 +6,6 @@ async function sendDiscordMessage(embed) {
     
     if (!webhookUrl) return console.warn("No DISCORD_WEBHOOK_URL set");
 
-    // Validate it's actually a URL before fetching
     try { new URL(webhookUrl); } catch {
         return console.error("DISCORD_WEBHOOK_URL is not a valid URL:", webhookUrl);
     }
@@ -19,7 +18,19 @@ async function sendDiscordMessage(embed) {
         });
 
         if (res.status === 429) {
-            console.warn("Discord rate limited — skipping this ping");
+            const retryAfter = res.headers.get('retry-after');
+            const waitMs = retryAfter ? parseFloat(retryAfter) * 1000 : 2000;
+            console.warn(`Discord rate limited — retrying after ${waitMs}ms`);
+            
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+            
+            // One retry
+            const retry = await fetch(webhookUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ embeds: [embed] })
+            });
+            console.log("Discord retry status:", retry.status);
             return;
         }
 

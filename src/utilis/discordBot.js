@@ -5,40 +5,46 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-client.once("ready", () => {
+client.once("clientReady", () => {
   console.log(`🤖 Bot logged in as ${client.user.tag}`);
 });
 
-console.log("🔑 TOKEN VALUE:", process.env.DISCORD_BOT_TOKEN);
-console.log("🔑 TOKEN LENGTH:", process.env.DISCORD_BOT_TOKEN?.length);
+async function loginWithTimeout(timeout = 10000) {
+  return Promise.race([
+    client.login(process.env.DISCORD_BOT_TOKEN),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Login timeout")), timeout)
+    )
+  ]);
+}
 
 async function loginWithRetry(retries = 5) {
-    try {
-      console.log("🔌 Attempting to connect to Discord...");
-      await client.login(process.env.DISCORD_BOT_TOKEN);
-      console.log("🚀 Login attempt sent");
-    } catch (err) {
-      console.error("❌ Login failed:", err.message);
-  
-      if (retries > 0) {
-        console.log(`🔄 Retrying in 5s... (${retries})`);
-        await new Promise(res => setTimeout(res, 5000));
-        return loginWithRetry(retries - 1);
-      } else {
-        console.error("💀 Could not connect to Discord");
-      }
+  try {
+    console.log("🔌 Attempting to connect to Discord...");
+    await loginWithTimeout();
+    console.log("🚀 Login attempt sent");
+  } catch (err) {
+    console.error("❌ Login failed:", err.message);
+
+    if (retries > 0) {
+      console.log(`🔄 Retrying in 5s... (${retries})`);
+      await new Promise(res => setTimeout(res, 5000));
+      return loginWithRetry(retries - 1);
+    } else {
+      console.error("💀 Could not connect to Discord");
     }
   }
-  
-  // ⏳ Delay before first login (VERY IMPORTANT)
-  setTimeout(() => {
-    loginWithRetry();
+}
+
+// 🚀 START THE BOT (you missed this before)
+setTimeout(() => {
+  loginWithRetry();
 }, 5000);
 
-// 👇 Better wait logic
+// 👇 Wait for bot readiness
 async function waitForReady() {
   if (client.isReady()) return;
-  await new Promise(resolve => client.once("ready", resolve));
+  await new Promise(resolve => client.once("clientReady", resolve));
 }
 
 async function sendBotMessage(channelId, embed) {

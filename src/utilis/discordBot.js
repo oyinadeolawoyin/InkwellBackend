@@ -9,6 +9,9 @@ client.once("ready", () => {
   console.log(`🤖 Bot logged in as ${client.user.tag}`);
 });
 
+console.log("🔑 TOKEN VALUE:", process.env.DISCORD_BOT_TOKEN);
+console.log("🔑 TOKEN LENGTH:", process.env.DISCORD_BOT_TOKEN?.length);
+
 async function loginWithRetry(retries = 5) {
     try {
       console.log("🔌 Attempting to connect to Discord...");
@@ -30,7 +33,7 @@ async function loginWithRetry(retries = 5) {
   // ⏳ Delay before first login (VERY IMPORTANT)
   setTimeout(() => {
     loginWithRetry();
-  }, 5000);
+}, 5000);
 
 // 👇 Better wait logic
 async function waitForReady() {

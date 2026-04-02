@@ -1,7 +1,7 @@
 const groupSprintService = require("../services/groupSprintService");
 const { notifyUser } = require('../services/notificationService');
 const { AccessToken, TrackSource } = require("livekit-server-sdk");
-const { notifyGroupSprintStarted, notifyGroupSprintEnded } = require('../services/discordService');
+const { notifyGroupSprintStarted, notifyGroupSprintEnded, notifyMemberCheckedOut } = require('../services/discordService');
 
 // ─── GROUP SPRINT ─────────────────────────────────────────────
 
@@ -127,11 +127,7 @@ async function checkoutSprint(req, res) {
     const sprintId = Number(req.params.sprintId);
     const { currentWordCount } = req.body;
 
-    console.log("[checkout] sprintId:", req.params.sprintId, "→ parsed:", sprintId, "| currentWordCount:", currentWordCount);
-
-    // Guard — sprintId must be a valid number
     if (!sprintId || isNaN(sprintId)) {
-        console.error("[checkout] Invalid sprintId received:", req.params.sprintId);
         return res.status(400).json({ message: "Invalid sprint ID." });
     }
 
@@ -139,15 +135,21 @@ async function checkoutSprint(req, res) {
         const sprint = await groupSprintService.checkoutSprint(
             sprintId,
             currentWordCount != null ? Number(currentWordCount) : 0
-        ); console.log("sprint", sprint);
+        );
 
         const user = req.user;
         const message = "Great job showing up and writing today. Every word counts 🌱";
         const link = `https://inkwellinky.vercel.app/snippet`;
-
         await notifyUser(user, message, link);
 
-        res.status(200).json({ sprint }); console.log("spr", sprint);
+        // 🔔 Ping daily drop channel
+        notifyMemberCheckedOut({
+            username: req.user.username,
+            wordsWritten: sprint.wordsWritten,
+            groupSprintId: sprint.groupSprintId,
+        }).catch((err) => console.error("Discord checkout notify failed:", err));
+
+        res.status(200).json({ sprint });
     } catch (error) {
         console.error("Checkout sprint error:", error);
         res.status(500).json({ message: "Something went wrong. Please try again later." });

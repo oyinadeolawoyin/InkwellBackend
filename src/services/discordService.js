@@ -26,4 +26,9 @@ async function notifyGroupSprintEnded({ username, groupSprintId, totalWordsWritt
   await callBot("/notify/sprint-ended", { username, groupSprintId, totalWordsWritten });
 }
 
-module.exports = { notifyGroupSprintStarted, notifyGroupSprintEnded };
+// add this new function alongside the existing ones
+async function notifyMemberCheckedOut({ username, wordsWritten, groupSprintId }) {
+  await callBot("/notify/member-checked-out", { username, wordsWritten, groupSprintId });
+}
+
+module.exports = { notifyGroupSprintStarted, notifyGroupSprintEnded, notifyMemberCheckedOut };

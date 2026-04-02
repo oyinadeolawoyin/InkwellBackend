@@ -24,7 +24,7 @@ async function startGroupSprint(userId, duration, soundscape) {
 }
 
 async function endGroupSprint(groupSprintId) {
-    // Force-close any member sprints that never checked out (prevents stuck isActive: true rows)
+    // Force-close any member sprints that never checked out (wordsWritten stays 0 for them)
     await prisma.sprint.updateMany({
         where: { groupSprintId, isActive: true },
         data: {
@@ -33,11 +33,20 @@ async function endGroupSprint(groupSprintId) {
         }
     });
 
+    // Recalculate totalWordsWritten from ALL sprints (including the ones just force-closed)
+    // This ensures Discord gets the real number, not 0
+    const allSprints = await prisma.sprint.findMany({
+        where: { groupSprintId },
+        select: { wordsWritten: true }
+    });
+    const totalWordsWritten = allSprints.reduce((sum, s) => sum + (s.wordsWritten || 0), 0);
+
     return prisma.groupSprint.update({
         where: { id: groupSprintId },
         data: {
             completedAt: new Date(),
             isActive: false,
+            totalWordsWritten,
         }
     });
 }

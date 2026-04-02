@@ -1,8 +1,6 @@
 
 const express = require("express");
 require("dotenv").config();
-console.log("🚀 app.js started");
-require("./src/utilis/discordBot");
 const app = express();
 const cookieParser = require("cookie-parser");
 const cors = require("cors");

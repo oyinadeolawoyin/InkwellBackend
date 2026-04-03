@@ -21,25 +21,26 @@ model User {
   resetToken       String?   @unique
   resetTokenExpiry DateTime?
 
-  groupSprints       GroupSprint[]
-  sprints            Sprint[]
-  notification       Notification[]
-  projects           Project[]
-  quoteLikes         QuoteLike[]
-  blogPostLikes      BlogPostLike[]
-  blogComments       BlogComment[]
-  blogReplies        BlogReply[]
-  writingSnippets    WritingSnippet[]
-  snippetLikes       SnippetLike[]
-  snippetComments    SnippetComment[]
-  snippetReplies     SnippetReply[]
-  snippetCommentLikes  SnippetCommentLike[]
-  snippetReplyLikes    SnippetReplyLike[]
-  wallPostsAuthored   WallPost[]        @relation("WallPostAuthor")
-  wallPostsReceived   WallPost[]        @relation("WallPostProfile")
+  groupSprints        GroupSprint[]
+  sprints             Sprint[]
+  notification        Notification[]
+  projects            Project[]
+  quoteLikes          QuoteLike[]
+  blogPostLikes       BlogPostLike[]
+  blogComments        BlogComment[]
+  blogReplies         BlogReply[]
+  writingSnippets     WritingSnippet[]
+  snippetLikes        SnippetLike[]
+  snippetComments     SnippetComment[]
+  snippetReplies      SnippetReply[]
+  snippetCommentLikes SnippetCommentLike[]
+  snippetReplyLikes   SnippetReplyLike[]
+  wallPostsAuthored   WallPost[]           @relation("WallPostAuthor")
+  wallPostsReceived   WallPost[]           @relation("WallPostProfile")
   wallPostLikes       WallPostLike[]
   wallPostComments    WallPostComment[]
   wallPostReplies     WallPostReply[]
+  soundscapes         Soundscape[]
 }
 
 model Project {
@@ -58,18 +59,17 @@ model Project {
 // ─── GROUP SPRINT ─────────────────────────────────────────────
 
 model GroupSprint {
-  id             Int       @id @default(autoincrement())
-  userId         Int
-  duration       Int
-  totalWordsWritten Int @default(0)
-  soundscape     String?   // e.g. "rain", "birds", "cafe"
-  liveKitRoomName  String?
-  startedAt      DateTime  @default(now())
-  completedAt    DateTime?
-  isActive       Boolean   @default(true)
+  id                Int       @id @default(autoincrement())
+  userId            Int
+  duration          Int
+  totalWordsWritten Int       @default(0)
+  liveKitRoomName   String?
+  startedAt         DateTime  @default(now())
+  completedAt       DateTime?
+  isActive          Boolean   @default(true)
 
-  sprints        Sprint[]
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sprints           Sprint[]
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([isActive])
@@ -81,6 +81,7 @@ model Sprint {
   id            Int          @id @default(autoincrement())
   userId        Int
   groupSprintId Int?
+  soundscapeId  Int?
   checkin       String?
   startWords    Int          @default(0)
   wordsWritten  Int          @default(0)
@@ -91,10 +92,30 @@ model Sprint {
 
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   groupSprint   GroupSprint? @relation(fields: [groupSprintId], references: [id], onDelete: SetNull)
+  soundscape    Soundscape?  @relation(fields: [soundscapeId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([groupSprintId])
   @@index([isActive])
+  @@index([soundscapeId])
+}
+
+// ─── SOUNDSCAPE ───────────────────────────────────────────────
+
+model Soundscape {
+  id            Int       @id @default(autoincrement())
+  name          String
+  creatorName   String?
+  fileUrl       String
+  contributedBy Int
+  isApproved    Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+
+  contributor   User      @relation(fields: [contributedBy], references: [id], onDelete: Cascade)
+  sprints       Sprint[]
+
+  @@index([contributedBy])
+  @@index([isApproved])
 }
 
 // ─── WEEKLY SESSION SCHEDULE ──────────────────────────────────
@@ -117,8 +138,8 @@ model WeeklySchedule {
 model ScheduledSession {
   id          Int      @id @default(autoincrement())
   scheduleId  Int
-  dayOfWeek   Int      // 0=Sun … 6=Sat
-  time        String   // "HH:mm" UTC
+  dayOfWeek   Int
+  time        String
   label       String?
   isDone      Boolean   @default(false)
   completedAt DateTime?
@@ -139,9 +160,9 @@ model WritingSnippet {
   context    String?
   mediaUrl   String?
   sourceType SnippetSource @default(POST_SPRINT)
-  tags       String? // e.g. "pacing,dialogue,worldbuilding" — comma separated
+  tags       String?
   createdAt  DateTime      @default(now())
-  
+
   user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   likes      SnippetLike[]
   comments   SnippetComment[]
@@ -167,7 +188,7 @@ model SnippetComment {
   snippetId Int
   content   String
   createdAt DateTime       @default(now())
-  
+
   likes     SnippetCommentLike[]
 
   user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -312,16 +333,16 @@ model BlogReply {
 }
 
 model WallPost {
-  id          Int           @id @default(autoincrement())
-  authorId    Int           // who wrote the post
-  profileId   Int           // whose wall it's on
-  content     String
-  createdAt   DateTime      @default(now())
+  id        Int      @id @default(autoincrement())
+  authorId  Int
+  profileId Int
+  content   String
+  createdAt DateTime @default(now())
 
-  author      User          @relation("WallPostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
-  profile     User          @relation("WallPostProfile", fields: [profileId], references: [id], onDelete: Cascade)
-  likes       WallPostLike[]
-  comments    WallPostComment[]
+  author   User              @relation("WallPostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  profile  User              @relation("WallPostProfile", fields: [profileId], references: [id], onDelete: Cascade)
+  likes    WallPostLike[]
+  comments WallPostComment[]
 
   @@index([profileId])
   @@index([authorId])
@@ -345,9 +366,9 @@ model WallPostComment {
   content    String
   createdAt  DateTime @default(now())
 
-  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  wallPost   WallPost        @relation(fields: [wallPostId], references: [id], onDelete: Cascade)
-  replies    WallPostReply[]
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallPost WallPost        @relation(fields: [wallPostId], references: [id], onDelete: Cascade)
+  replies  WallPostReply[]
 
   @@index([wallPostId])
   @@index([userId])
@@ -360,8 +381,8 @@ model WallPostReply {
   content   String
   createdAt DateTime        @default(now())
 
-  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  comment   WallPostComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment WallPostComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   @@index([commentId])
   @@index([userId])

@@ -6,17 +6,16 @@ const { notifyGroupSprintStarted, notifyGroupSprintEnded, notifyMemberCheckedOut
 // ─── GROUP SPRINT ─────────────────────────────────────────────
 
 async function startGroupSprint(req, res) {
-    const { duration, soundscape } = req.body;
+    // soundscape removed — no longer set at group level
+    const { duration } = req.body;
     const userId = Number(req.user.id);
 
     try {
-        const groupSprint = await groupSprintService.startGroupSprint(userId, Number(duration), soundscape);
+        const groupSprint = await groupSprintService.startGroupSprint(userId, Number(duration));
 
-        // 🔔 Ping Discord
         await notifyGroupSprintStarted({
             username: req.user.username,
             duration,
-            soundscape,
             groupSprintId: groupSprint.id
         });
 
@@ -38,7 +37,6 @@ async function endGroupSprint(req, res) {
         const link = `https://inkwellinky.vercel.app/group-sprint/${groupSprintId}`;
         await notifyUser(user, message, link);
 
-        // 🔔 Ping Discord
         await notifyGroupSprintEnded({
             username: req.user.username,
             groupSprintId,
@@ -87,14 +85,13 @@ async function fetchAllActiveGroupSprints(req, res) {
     }
 }
 
-// Returns the last completed group sprint for the homepage
 async function fetchLastGroupSprint(req, res) {
     try {
         const groupSprint = await groupSprintService.fetchLastGroupSprint();
         if (!groupSprint) {
             return res.status(404).json({ message: "No completed group sprint found" });
         }
-        res.status(200).json({ groupSprint }); console.log("gs", groupSprint);
+        res.status(200).json({ groupSprint });
     } catch (error) {
         console.error("Fetch last group sprint error:", error);
         res.status(500).json({ message: "Something went wrong. Please try again later." });
@@ -103,9 +100,9 @@ async function fetchLastGroupSprint(req, res) {
 
 // ─── SPRINT ───────────────────────────────────────────────────
 
-// Member joins a group sprint room
 async function joinSprint(req, res) {
-    const { groupSprintId, checkin, startWords } = req.body;
+    // soundscapeId is now passed from the member at join time
+    const { groupSprintId, checkin, startWords, soundscapeId } = req.body;
     const userId = Number(req.user.id);
 
     try {
@@ -113,7 +110,8 @@ async function joinSprint(req, res) {
             userId,
             Number(groupSprintId),
             checkin,
-            startWords != null ? Number(startWords) : 0
+            startWords != null ? Number(startWords) : 0,
+            soundscapeId ? Number(soundscapeId) : null
         );
         res.status(201).json({ sprint });
     } catch (error) {
@@ -122,7 +120,6 @@ async function joinSprint(req, res) {
     }
 }
 
-// Member checks out of sprint — enters their current word count
 async function checkoutSprint(req, res) {
     const sprintId = Number(req.params.sprintId);
     const { currentWordCount } = req.body;
@@ -142,7 +139,6 @@ async function checkoutSprint(req, res) {
         const link = `https://inkwellinky.vercel.app/snippet`;
         await notifyUser(user, message, link);
 
-        // 🔔 Ping daily drop channel
         notifyMemberCheckedOut({
             username: req.user.username,
             wordsWritten: sprint.wordsWritten,
@@ -182,7 +178,6 @@ async function getLiveKitToken(req, res) {
             return res.status(400).json({ message: "No LiveKit room found for this sprint" });
         }
 
-        // Safety check — catch missing env vars early with a clear message
         if (!process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {
             console.error("Missing LIVEKIT_API_KEY or LIVEKIT_API_SECRET in .env");
             return res.status(500).json({ message: "LiveKit is not configured on the server." });
@@ -202,8 +197,7 @@ async function getLiveKitToken(req, res) {
             canPublishSources: [TrackSource.SCREEN_SHARE],
         });
 
-        const jwt = await at.toJwt(); // ✅ always await
-
+        const jwt = await at.toJwt();
         res.status(200).json({ token: jwt, roomName: groupSprint.liveKitRoomName });
     } catch (error) {
         console.error("LiveKit token error:", error);
@@ -221,4 +215,4 @@ module.exports = {
     checkoutSprint,
     fetchLoginUserSprint,
     getLiveKitToken
-}
+};

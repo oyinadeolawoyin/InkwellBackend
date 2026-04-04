@@ -1,6 +1,4 @@
-const { param } = require("../routes/notificationRoutes");
 const notificationsService = require("../services/notificationService");
-const userService = require("../services/userService");
 
 // ============================================
 // NOTIFICATION OPERATIONS
@@ -56,7 +54,7 @@ async function getNotifications(req, res) {
 async function markRead(req, res) {
     try {
         const userId = Number(req.params.userId);
-        await userService.markNotificationRead(userId)
+        await notificationsService.markNotificationRead(userId)
         res.status(200).json({ message: "Notification marked as read" });
     } catch (error) {
         console.error("Mark notification as read error:", error);

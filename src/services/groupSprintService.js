@@ -36,14 +36,14 @@ async function fetchGroupSprint(groupSprintId) {
   return prisma.groupSprint.findFirst({
     where: { id: groupSprintId },
     include: {
-      sprints: {
-        include: {
-          user: { select: { username: true, avatar: true } },
-          soundscape: {  // each member's chosen soundscape
-            select: { id: true, name: true, fileUrl: true, creatorName: true }
+        sprints: {
+          include: {
+            user: { select: { username: true, avatar: true, discordId: true } },
+            soundscape: {
+              select: { id: true, name: true, fileUrl: true, creatorName: true }
+            }
           }
-        }
-      },
+        },
       _count: { select: { sprints: true } },
       user: { select: { username: true, avatar: true } }
     }

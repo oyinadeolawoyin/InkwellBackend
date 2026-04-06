@@ -3,16 +3,27 @@ const router = express.Router();
 const groupSprintController = require("../controllers/groupSprintController");
 const { authenticateJWT } = require("../config/jwt");
 
-// ─── GROUP SPRINT ─────────────────────────────────────────────
-router.get("/activeGroupSprints", groupSprintController.fetchAllActiveGroupSprints);   // public — show active sessions
-router.get("/lastGroupSprint", groupSprintController.fetchLastGroupSprint);             // public — homepage results
+// ─── Bot secret middleware ────────────────────────────────────
 
+function requireBotSecret(req, res, next) {
+  if (req.headers["x-bot-secret"] !== process.env.BOT_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  next();
+}
+
+// ─── Bot routes — no JWT, secret only ────────────────────────
+router.post("/bot/startGroupSprint", requireBotSecret, groupSprintController.startGroupSprint);
+router.post("/bot/join", requireBotSecret, groupSprintController.botJoinSprint);
+router.get("/bot/:groupSprintId", requireBotSecret, groupSprintController.fetchGroupSprint); // 👈 needed by notifyService
+
+// ─── GROUP SPRINT ─────────────────────────────────────────────
+router.get("/activeGroupSprints", groupSprintController.fetchAllActiveGroupSprints);
+router.get("/lastGroupSprint", groupSprintController.fetchLastGroupSprint);
 router.post("/startGroupSprint", authenticateJWT, groupSprintController.startGroupSprint);
 
-// ─── SPRINT (member joining a group sprint) ───────────────────
-// IMPORTANT: specific routes must come before /:groupSprintId
-router.get("/loginUserSession", authenticateJWT, groupSprintController.fetchLoginUserSprint); // get logged in user's active sprint
-
+// ─── SPRINT ───────────────────────────────────────────────────
+router.get("/loginUserSession", authenticateJWT, groupSprintController.fetchLoginUserSprint);
 router.post("/join", authenticateJWT, groupSprintController.joinSprint);
 router.post("/:sprintId/checkout", authenticateJWT, groupSprintController.checkoutSprint);
 

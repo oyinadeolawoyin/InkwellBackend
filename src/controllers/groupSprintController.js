@@ -6,24 +6,30 @@ const { notifyGroupSprintStarted, notifyGroupSprintEnded, notifyMemberCheckedOut
 // ─── GROUP SPRINT ─────────────────────────────────────────────
 
 async function startGroupSprint(req, res) {
-    // soundscape removed — no longer set at group level
-    const { duration } = req.body;
-    const userId = Number(req.user.id);
+  const { duration, userId: bodyUserId, username: bodyUsername } = req.body;
 
-    try {
-        const groupSprint = await groupSprintService.startGroupSprint(userId, Number(duration));
+  // Bot calls pass userId + username in the body (no JWT session)
+  const userId = req.user ? Number(req.user.id) : Number(bodyUserId);
+  const username = req.user ? req.user.username : bodyUsername;
 
-        await notifyGroupSprintStarted({
-            username: req.user.username,
-            duration,
-            groupSprintId: groupSprint.id
-        });
+  if (!userId || !username) {
+    return res.status(400).json({ message: "Missing userId or username" });
+  }
 
-        res.status(201).json({ groupSprint });
-    } catch (error) {
-        console.error("Group sprint start error:", error);
-        res.status(500).json({ message: "Something went wrong. Please try again later." });
-    }
+  try {
+    const groupSprint = await groupSprintService.startGroupSprint(userId, Number(duration));
+
+    await notifyGroupSprintStarted({
+      username,
+      duration,
+      groupSprintId: groupSprint.id,
+    });
+
+    res.status(201).json({ groupSprint });
+  } catch (error) {
+    console.error("Group sprint start error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
 }
 
 async function endGroupSprint(req, res) {
@@ -120,6 +126,29 @@ async function joinSprint(req, res) {
     }
 }
 
+async function botJoinSprint(req, res) {
+  const { groupSprintId, startWords, soundscapeId, userId, username } = req.body;
+
+  if (!userId || !groupSprintId) {
+    return res.status(400).json({ message: "Missing userId or groupSprintId" });
+  }
+
+  try {
+    const sprint = await groupSprintService.joinSprint(
+      Number(userId),
+      Number(groupSprintId),
+      null,          // checkin — not applicable from bot
+      startWords != null ? Number(startWords) : 0,
+      soundscapeId ? Number(soundscapeId) : null
+    );
+
+    res.status(201).json({ sprint });
+  } catch (error) {
+    console.error("Bot join sprint error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
 async function checkoutSprint(req, res) {
     const sprintId = Number(req.params.sprintId);
     const { currentWordCount } = req.body;
@@ -212,6 +241,7 @@ module.exports = {
     fetchAllActiveGroupSprints,
     fetchLastGroupSprint,
     joinSprint,
+    botJoinSprint,
     checkoutSprint,
     fetchLoginUserSprint,
     getLiveKitToken

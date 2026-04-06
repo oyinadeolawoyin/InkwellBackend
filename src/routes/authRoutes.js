@@ -44,9 +44,14 @@ router.post("/signup", validateForm, (req, res) => {
   authController.signup(req, res);
 });
 
+// Login accepts email OR Discord ID as `identifier`
 router.post("/login", authController.login);
 router.post("/logout", authController.logout);
 router.get("/me", authenticateJWT, authController.getMe);
+
+// Change/set password — works for both site users and Discord-only users
+router.patch("/changePassword", authenticateJWT, authController.changePassword);
+
 router.post("/forgetPassword", authController.forgetPassword);
 router.post("/resetPassword", authController.resetPassword);
 

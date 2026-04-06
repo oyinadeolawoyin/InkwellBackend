@@ -97,6 +97,16 @@ async function updatePassword(id, password) {
   });
 }
 
+/**
+ * Find a user by their Discord ID
+ * Used for Discord-ID-based login
+ */
+async function findUserByDiscordId(discordId) {
+  return await prisma.user.findUnique({
+    where: { discordId },
+  });
+}
+
 // ==================== Exports ====================
 
 module.exports = {
@@ -105,5 +115,6 @@ module.exports = {
   saveResetToken,
   findUserByResetToken,
   clearResetToken,
-  updatePassword
+  updatePassword,
+  findUserByDiscordId
 };

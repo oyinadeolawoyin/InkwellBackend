@@ -11,8 +11,8 @@ datasource db {
 model User {
   id               Int       @id @default(autoincrement())
   username         String    @unique
-  email            String    @unique
-  password         String
+  email            String?    @unique
+  password         String?
   discordId        String?  @unique  
   createdVia       String   @default("site") 
   avatar           String?

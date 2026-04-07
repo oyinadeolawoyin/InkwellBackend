@@ -1,7 +1,12 @@
 const groupSprintService = require("../services/groupSprintService");
 const { notifyUser } = require('../services/notificationService');
 const { AccessToken, TrackSource } = require("livekit-server-sdk");
-const { notifyGroupSprintStarted, notifyGroupSprintEnded, notifyMemberCheckedOut, notifyMemberCheckedIn } = require('../services/discordService');
+const {
+  notifyGroupSprintStarted,
+  notifyGroupSprintEnded,
+  notifyMemberCheckedIn,
+  notifyMemberCheckedOut,
+} = require('../services/discordService');
 
 // ─── GROUP SPRINT ─────────────────────────────────────────────
 
@@ -19,11 +24,12 @@ async function startGroupSprint(req, res) {
   try {
     const groupSprint = await groupSprintService.startGroupSprint(userId, Number(duration));
 
-    await notifyGroupSprintStarted({
+    // Notify Discord: sprint started (fires for both site and bot starts)
+    notifyGroupSprintStarted({
       username,
       duration,
       groupSprintId: groupSprint.id,
-    });
+    }).catch((err) => console.error("Discord sprint-started notify failed:", err));
 
     res.status(201).json({ groupSprint });
   } catch (error) {
@@ -33,105 +39,107 @@ async function startGroupSprint(req, res) {
 }
 
 async function endGroupSprint(req, res) {
-    const groupSprintId = Number(req.params.groupSprintId);
+  const groupSprintId = Number(req.params.groupSprintId);
 
-    try {
-        const groupSprint = await groupSprintService.endGroupSprint(groupSprintId);
+  try {
+    const groupSprint = await groupSprintService.endGroupSprint(groupSprintId);
 
-        const user = req.user;
-        const message = "You did great for arranging the sprint and helping others write. You should be proud of yourself 🌱";
-        const link = `https://inkwellinky.vercel.app/group-sprint/${groupSprintId}`;
-        await notifyUser(user, message, link);
+    const user = req.user;
+    const message = "You did great for arranging the sprint and helping others write. You should be proud of yourself 🌱";
+    const link = `https://inkwellinky.vercel.app/group-sprint/${groupSprintId}`;
+    await notifyUser(user, message, link);
 
-        await notifyGroupSprintEnded({
-            username: req.user.username,
-            groupSprintId,
-            totalWordsWritten: groupSprint.totalWordsWritten
-        });
-
-        res.status(200).json({ groupSprint });
-    } catch (error) {
-        console.error("Group sprint end error:", error);
-        res.status(500).json({ message: "Something went wrong. Please try again later." });
+    // Only ping Discord with the final word count once the sprint is fully ended
+    // (isActive === false means all members resolved and the sprint is closed)
+    if (!groupSprint.isActive) {
+      notifyGroupSprintEnded({
+        groupSprintId,
+        totalWordsWritten: groupSprint.totalWordsWritten,
+      }).catch((err) => console.error("Discord sprint-ended notify failed:", err));
     }
+
+    res.status(200).json({ groupSprint });
+  } catch (error) {
+    console.error("Group sprint end error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
 }
 
 async function fetchGroupSprint(req, res) {
-    const groupSprintId = Number(req.params.groupSprintId);
-    try {
-        const groupSprint = await groupSprintService.fetchGroupSprint(groupSprintId);
-        if (!groupSprint) {
-            return res.status(404).json({ message: "Group sprint not found" });
-        }
-        res.status(200).json({ groupSprint });
-    } catch (error) {
-        console.error("Fetch group sprint error:", error);
-        res.status(500).json({ message: "Something went wrong. Please try again later." });
+  const groupSprintId = Number(req.params.groupSprintId);
+  try {
+    const groupSprint = await groupSprintService.fetchGroupSprint(groupSprintId);
+    if (!groupSprint) {
+      return res.status(404).json({ message: "Group sprint not found" });
     }
+    res.status(200).json({ groupSprint });
+  } catch (error) {
+    console.error("Fetch group sprint error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
 }
 
 async function fetchAllActiveGroupSprints(req, res) {
-    const page = Number(req.query.page) || 1;
-    const limit = Number(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+  const page = Number(req.query.page) || 1;
+  const limit = Number(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
 
-    try {
-        const result = await groupSprintService.fetchAllActiveGroupSprints({ skip, take: limit });
+  try {
+    const result = await groupSprintService.fetchAllActiveGroupSprints({ skip, take: limit });
 
-        res.status(200).json({
-            page,
-            limit,
-            total: result.total,
-            totalPages: Math.ceil(result.total / limit),
-            groupSprints: result.groupSprints
-        });
-    } catch (error) {
-        console.error("Fetch active group sprints error:", error);
-        res.status(500).json({ message: "Something went wrong. Please try again later." });
-    }
+    res.status(200).json({
+      page,
+      limit,
+      total: result.total,
+      totalPages: Math.ceil(result.total / limit),
+      groupSprints: result.groupSprints,
+    });
+  } catch (error) {
+    console.error("Fetch active group sprints error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
 }
 
 async function fetchLastGroupSprint(req, res) {
-    try {
-        const groupSprint = await groupSprintService.fetchLastGroupSprint();
-        if (!groupSprint) {
-            return res.status(404).json({ message: "No completed group sprint found" });
-        }
-        res.status(200).json({ groupSprint });
-    } catch (error) {
-        console.error("Fetch last group sprint error:", error);
-        res.status(500).json({ message: "Something went wrong. Please try again later." });
+  try {
+    const groupSprint = await groupSprintService.fetchLastGroupSprint();
+    if (!groupSprint) {
+      return res.status(404).json({ message: "No completed group sprint found" });
     }
+    res.status(200).json({ groupSprint });
+  } catch (error) {
+    console.error("Fetch last group sprint error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
 }
 
 // ─── SPRINT ───────────────────────────────────────────────────
 
 async function joinSprint(req, res) {
-    // soundscapeId is now passed from the member at join time
-    const { groupSprintId, checkin, startWords, soundscapeId } = req.body;
-    const userId = Number(req.user.id);
+  const { groupSprintId, checkin, startWords, soundscapeId } = req.body;
+  const userId = Number(req.user.id);
 
-    try {
-        const sprint = await groupSprintService.joinSprint(
-            userId,
-            Number(groupSprintId),
-            checkin,
-            startWords != null ? Number(startWords) : 0,
-            soundscapeId ? Number(soundscapeId) : null
-        );
+  try {
+    const sprint = await groupSprintService.joinSprint(
+      userId,
+      Number(groupSprintId),
+      checkin,
+      startWords != null ? Number(startWords) : 0,
+      soundscapeId ? Number(soundscapeId) : null
+    );
 
-        // Notify Discord that someone joined from the site
-        notifyMemberCheckedIn({
-            username: req.user.username,
-            startWords: startWords != null ? Number(startWords) : 0,
-            groupSprintId: Number(groupSprintId),
-        }).catch((err) => console.error("Discord join notify failed:", err));
+    // Notify Discord: member joined from the site
+    notifyMemberCheckedIn({
+      username: req.user.username,
+      startWords: startWords != null ? Number(startWords) : 0,
+      groupSprintId: Number(groupSprintId),
+    }).catch((err) => console.error("Discord member-checked-in notify failed:", err));
 
-        res.status(201).json({ sprint });
-    } catch (error) {
-        console.error("Join sprint error:", error);
-        res.status(500).json({ message: "Something went wrong. Please try again later." });
-    }
+    res.status(201).json({ sprint });
+  } catch (error) {
+    console.error("Join sprint error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
 }
 
 async function botJoinSprint(req, res) {
@@ -145,7 +153,7 @@ async function botJoinSprint(req, res) {
     const sprint = await groupSprintService.joinSprint(
       Number(userId),
       Number(groupSprintId),
-      null,          // checkin — not applicable from bot
+      null,         // checkin — not applicable from bot
       startWords != null ? Number(startWords) : 0,
       soundscapeId ? Number(soundscapeId) : null
     );
@@ -158,99 +166,109 @@ async function botJoinSprint(req, res) {
 }
 
 async function checkoutSprint(req, res) {
-    const sprintId = Number(req.params.sprintId);
-    const { currentWordCount } = req.body;
+  const sprintId = Number(req.params.sprintId);
+  const { currentWordCount } = req.body;
 
-    if (!sprintId || isNaN(sprintId)) {
-        return res.status(400).json({ message: "Invalid sprint ID." });
+  if (!sprintId || isNaN(sprintId)) {
+    return res.status(400).json({ message: "Invalid sprint ID." });
+  }
+
+  try {
+    const sprint = await groupSprintService.checkoutSprint(
+      sprintId,
+      currentWordCount != null ? Number(currentWordCount) : 0
+    );
+
+    const user = req.user;
+    const message = "Great job showing up and writing today. Every word counts 🌱";
+    const link = `https://inkwellinky.vercel.app/snippet`;
+    await notifyUser(user, message, link);
+
+    // Notify Discord: member submitted their word count
+    notifyMemberCheckedOut({
+      username: req.user.username,
+      wordsWritten: sprint.wordsWritten,
+      groupSprintId: sprint.groupSprintId,
+    }).catch((err) => console.error("Discord member-checked-out notify failed:", err));
+
+    // If the last member just checked out, the group sprint is now fully ended —
+    // fire the end-of-sprint ping with the total word count
+    if (sprint.groupSprint && !sprint.groupSprint.isActive) {
+      notifyGroupSprintEnded({
+        groupSprintId: sprint.groupSprintId,
+        totalWordsWritten: sprint.groupSprint.totalWordsWritten,
+      }).catch((err) => console.error("Discord sprint-ended (auto) notify failed:", err));
     }
 
-    try {
-        const sprint = await groupSprintService.checkoutSprint(
-            sprintId,
-            currentWordCount != null ? Number(currentWordCount) : 0
-        );
-
-        const user = req.user;
-        const message = "Great job showing up and writing today. Every word counts 🌱";
-        const link = `https://inkwellinky.vercel.app/snippet`;
-        await notifyUser(user, message, link);
-
-        notifyMemberCheckedOut({
-            username: req.user.username,
-            wordsWritten: sprint.wordsWritten,
-            groupSprintId: sprint.groupSprintId,
-        }).catch((err) => console.error("Discord checkout notify failed:", err));
-
-        res.status(200).json({ sprint });
-    } catch (error) {
-        console.error("Checkout sprint error:", error);
-        res.status(500).json({ message: "Something went wrong. Please try again later." });
-    }
+    res.status(200).json({ sprint });
+  } catch (error) {
+    console.error("Checkout sprint error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
 }
 
 async function fetchLoginUserSprint(req, res) {
-    const userId = Number(req.user.id);
-    try {
-        const sprint = await groupSprintService.fetchLoginUserSprint(userId);
-        res.status(200).json({ sprint });
-    } catch (error) {
-        console.error("Fetch user's sprint error:", error);
-        res.status(500).json({ message: "Something went wrong. Please try again later." });
-    }
+  const userId = Number(req.user.id);
+  try {
+    const sprint = await groupSprintService.fetchLoginUserSprint(userId);
+    res.status(200).json({ sprint });
+  } catch (error) {
+    console.error("Fetch user's sprint error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
 }
 
 // ─── LIVEKIT TOKEN ────────────────────────────────────────────
 
 async function getLiveKitToken(req, res) {
-    const groupSprintId = Number(req.params.groupSprintId);
+  const groupSprintId = Number(req.params.groupSprintId);
 
-    try {
-        const groupSprint = await groupSprintService.fetchGroupSprint(groupSprintId);
+  try {
+    const groupSprint = await groupSprintService.fetchGroupSprint(groupSprintId);
 
-        if (!groupSprint) {
-            return res.status(404).json({ message: "Group sprint not found" });
-        }
-        if (!groupSprint.liveKitRoomName) {
-            return res.status(400).json({ message: "No LiveKit room found for this sprint" });
-        }
-
-        if (!process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {
-            console.error("Missing LIVEKIT_API_KEY or LIVEKIT_API_SECRET in .env");
-            return res.status(500).json({ message: "LiveKit is not configured on the server." });
-        }
-
-        const at = new AccessToken(
-            process.env.LIVEKIT_API_KEY,
-            process.env.LIVEKIT_API_SECRET,
-            { identity: req.user.username, ttl: "2h" }
-        );
-
-        at.addGrant({
-            roomJoin: true,
-            room: groupSprint.liveKitRoomName,
-            canPublish: true,
-            canSubscribe: true,
-            canPublishSources: [TrackSource.SCREEN_SHARE],
-        });
-
-        const jwt = await at.toJwt();
-        res.status(200).json({ token: jwt, roomName: groupSprint.liveKitRoomName });
-    } catch (error) {
-        console.error("LiveKit token error:", error);
-        res.status(500).json({ message: "Something went wrong. Please try again later." });
+    if (!groupSprint) {
+      return res.status(404).json({ message: "Group sprint not found" });
     }
+    if (!groupSprint.liveKitRoomName) {
+      return res.status(400).json({ message: "No LiveKit room found for this sprint" });
+    }
+
+    if (!process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {
+      console.error("Missing LIVEKIT_API_KEY or LIVEKIT_API_SECRET in .env");
+      return res.status(500).json({ message: "LiveKit is not configured on the server." });
+    }
+
+    const at = new AccessToken(
+      process.env.LIVEKIT_API_KEY,
+      process.env.LIVEKIT_API_SECRET,
+      { identity: req.user.username, ttl: "2h" }
+    );
+
+    at.addGrant({
+      roomJoin: true,
+      room: groupSprint.liveKitRoomName,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishSources: [TrackSource.SCREEN_SHARE],
+    });
+
+    const jwt = await at.toJwt();
+    res.status(200).json({ token: jwt, roomName: groupSprint.liveKitRoomName });
+  } catch (error) {
+    console.error("LiveKit token error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
 }
 
 module.exports = {
-    startGroupSprint,
-    endGroupSprint,
-    fetchGroupSprint,
-    fetchAllActiveGroupSprints,
-    fetchLastGroupSprint,
-    joinSprint,
-    botJoinSprint,
-    checkoutSprint,
-    fetchLoginUserSprint,
-    getLiveKitToken
+  startGroupSprint,
+  endGroupSprint,
+  fetchGroupSprint,
+  fetchAllActiveGroupSprints,
+  fetchLastGroupSprint,
+  joinSprint,
+  botJoinSprint,
+  checkoutSprint,
+  fetchLoginUserSprint,
+  getLiveKitToken,
 };

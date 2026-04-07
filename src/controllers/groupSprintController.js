@@ -1,7 +1,7 @@
 const groupSprintService = require("../services/groupSprintService");
 const { notifyUser } = require('../services/notificationService');
 const { AccessToken, TrackSource } = require("livekit-server-sdk");
-const { notifyGroupSprintStarted, notifyGroupSprintEnded, notifyMemberCheckedOut } = require('../services/discordService');
+const { notifyGroupSprintStarted, notifyGroupSprintEnded, notifyMemberCheckedOut, notifyMemberCheckedIn } = require('../services/discordService');
 
 // ─── GROUP SPRINT ─────────────────────────────────────────────
 
@@ -119,6 +119,14 @@ async function joinSprint(req, res) {
             startWords != null ? Number(startWords) : 0,
             soundscapeId ? Number(soundscapeId) : null
         );
+
+        // Notify Discord that someone joined from the site
+        notifyMemberCheckedIn({
+            username: req.user.username,
+            startWords: startWords != null ? Number(startWords) : 0,
+            groupSprintId: Number(groupSprintId),
+        }).catch((err) => console.error("Discord join notify failed:", err));
+
         res.status(201).json({ sprint });
     } catch (error) {
         console.error("Join sprint error:", error);

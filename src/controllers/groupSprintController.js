@@ -9,22 +9,27 @@ const {
 } = require('../services/discordService');
 
 // ─── GROUP SPRINT ─────────────────────────────────────────────
-
 async function startGroupSprint(req, res) {
-  const { duration, userId: bodyUserId, username: bodyUsername } = req.body;
+  const { duration, visibility, sprintType, userId: bodyUserId, username: bodyUsername } = req.body;
 
-  // Bot calls pass userId + username in the body (no JWT session)
-  const userId = req.user ? Number(req.user.id) : Number(bodyUserId);
-  const username = req.user ? req.user.username : bodyUsername;
+  const userId   = req.user ? Number(req.user.id)       : Number(bodyUserId);
+  const username = req.user ? req.user.username          : bodyUsername;
 
   if (!userId || !username) {
     return res.status(400).json({ message: "Missing userId or username" });
   }
 
-  try {
-    const groupSprint = await groupSprintService.startGroupSprint(userId, Number(duration));
+  const allowedVisibilities = ["PUBLIC", "PRIVATE"];
+  const resolvedVisibility  = allowedVisibilities.includes(visibility) ? visibility : "PUBLIC";
 
-    // Notify Discord: sprint started (fires for both site and bot starts)
+  const allowedSprintTypes  = ["WRITING", "READING"];
+  const resolvedSprintType  = allowedSprintTypes.includes(sprintType)  ? sprintType  : "WRITING";
+
+  try {
+    const groupSprint = await groupSprintService.startGroupSprint(
+      userId, Number(duration), resolvedVisibility, resolvedSprintType
+    );
+
     notifyGroupSprintStarted({
       username,
       duration,
@@ -44,13 +49,11 @@ async function endGroupSprint(req, res) {
   try {
     const groupSprint = await groupSprintService.endGroupSprint(groupSprintId);
 
-    const user = req.user;
+    const user    = req.user;
     const message = "You did great for arranging the sprint and helping others write. You should be proud of yourself 🌱";
-    const link = `https://inkwellinky.vercel.app/group-sprint/${groupSprintId}`;
+    const link    = `https://inkwellinky.vercel.app/group-sprint/${groupSprintId}`;
     await notifyUser(user, message, link);
 
-    // Only ping Discord with the final word count once the sprint is fully ended
-    // (isActive === false means all members resolved and the sprint is closed)
     if (!groupSprint.isActive) {
       notifyGroupSprintEnded({
         groupSprintId,
@@ -80,9 +83,9 @@ async function fetchGroupSprint(req, res) {
 }
 
 async function fetchAllActiveGroupSprints(req, res) {
-  const page = Number(req.query.page) || 1;
+  const page  = Number(req.query.page)  || 1;
   const limit = Number(req.query.limit) || 10;
-  const skip = (page - 1) * limit;
+  const skip  = (page - 1) * limit;
 
   try {
     const result = await groupSprintService.fetchAllActiveGroupSprints({ skip, take: limit });
@@ -116,7 +119,7 @@ async function fetchLastGroupSprint(req, res) {
 // ─── SPRINT ───────────────────────────────────────────────────
 
 async function joinSprint(req, res) {
-  const { groupSprintId, checkin, startWords, soundscapeId } = req.body;
+  const { groupSprintId, checkin, startWords, soundscapeId, projectId } = req.body;
   const userId = Number(req.user.id);
 
   try {
@@ -124,13 +127,13 @@ async function joinSprint(req, res) {
       userId,
       Number(groupSprintId),
       checkin,
-      startWords != null ? Number(startWords) : 0,
-      soundscapeId ? Number(soundscapeId) : null
+      startWords    != null ? Number(startWords)    : 0,
+      soundscapeId  ? Number(soundscapeId)  : null,
+      projectId     ? Number(projectId)     : null,   // ← new
     );
 
-    // Notify Discord: member joined from the site
     notifyMemberCheckedIn({
-      username: req.user.username,
+      username:   req.user.username,
       startWords: startWords != null ? Number(startWords) : 0,
       groupSprintId: Number(groupSprintId),
     }).catch((err) => console.error("Discord member-checked-in notify failed:", err));
@@ -153,9 +156,10 @@ async function botJoinSprint(req, res) {
     const sprint = await groupSprintService.joinSprint(
       Number(userId),
       Number(groupSprintId),
-      null,         // checkin — not applicable from bot
-      startWords != null ? Number(startWords) : 0,
-      soundscapeId ? Number(soundscapeId) : null
+      null,
+      startWords   != null ? Number(startWords)   : 0,
+      soundscapeId ? Number(soundscapeId) : null,
+      null,   // bots don't link a project
     );
 
     res.status(201).json({ sprint });
@@ -179,23 +183,20 @@ async function checkoutSprint(req, res) {
       currentWordCount != null ? Number(currentWordCount) : 0
     );
 
-    const user = req.user;
+    const user    = req.user;
     const message = "Great job showing up and writing today. Every word counts 🌱";
-    const link = `https://inkwellinky.vercel.app/snippet`;
+    const link    = `https://inkwellinky.vercel.app/snippet`;
     await notifyUser(user, message, link);
 
-    // Notify Discord: member submitted their word count
     notifyMemberCheckedOut({
-      username: req.user.username,
+      username:     req.user.username,
       wordsWritten: sprint.wordsWritten,
       groupSprintId: sprint.groupSprintId,
     }).catch((err) => console.error("Discord member-checked-out notify failed:", err));
 
-    // If the last member just checked out, the group sprint is now fully ended —
-    // fire the end-of-sprint ping with the total word count
     if (sprint.groupSprint && !sprint.groupSprint.isActive) {
       notifyGroupSprintEnded({
-        groupSprintId: sprint.groupSprintId,
+        groupSprintId:     sprint.groupSprintId,
         totalWordsWritten: sprint.groupSprint.totalWordsWritten,
       }).catch((err) => console.error("Discord sprint-ended (auto) notify failed:", err));
     }
@@ -245,10 +246,10 @@ async function getLiveKitToken(req, res) {
     );
 
     at.addGrant({
-      roomJoin: true,
-      room: groupSprint.liveKitRoomName,
-      canPublish: true,
-      canSubscribe: true,
+      roomJoin:          true,
+      room:              groupSprint.liveKitRoomName,
+      canPublish:        true,
+      canSubscribe:      true,
       canPublishSources: [TrackSource.SCREEN_SHARE],
     });
 

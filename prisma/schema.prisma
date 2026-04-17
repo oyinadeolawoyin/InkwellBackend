@@ -27,6 +27,8 @@ model User {
   sprints             Sprint[]
   notification        Notification[]
   projects            Project[]
+  todolists           Todolist[]
+  notes               Note[]
   quoteLikes          QuoteLike[]
   blogPostLikes       BlogPostLike[]
   blogComments        BlogComment[]
@@ -46,36 +48,138 @@ model User {
 }
 
 model Project {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  title       String
-  description String?
-  link        String
-  createdAt   DateTime @default(now())
+  id               Int       @id @default(autoincrement())
+  userId           Int
+  title            String
+  description      String?
+  link             String?                  // make optional — not all projects need a link
+  genre            String?
+  visibility       Visibility @default(PRIVATE)  // new: public or private
+  targetWordCount  Int?                     // e.g. 80,000
+  currentWordCount Int       @default(0)   // updated as writer logs progress
+  // ─── Chapter / Scene Tracker ──────────────────
+  targetChapters      Int?              // e.g. 30 chapters total
+  currentChapters     Int    @default(0)
+  targetScenes        Int?              // e.g. 90 scenes total
+  currentScenes       Int    @default(0)
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // ─── Session Habit Tracker ────────────────────
+  sessionGoalType     SessionGoalType?  // WEEKLY or MONTHLY
+  sessionGoalCount    Int?              // e.g. 5 sessions per week/month
+  currentSessionCount Int    @default(0) // resets when period rolls over
+  lastSessionReset    DateTime?         // tracks when the count last reset
+
+  deadline         DateTime?               // when do they want to finish?
+  daysPerWeek      Int @default(5)               // how many days/week they plan to write
+  status           ProjectStatus @default(IN_PROGRESS)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wordLogs         ProjectWordLog[]        
+  progressLogs     ProjectProgressLog[]  
+  sessionLogs      ProjectSessionLog[] 
+  todolists        Todolist[]
+  notes            Note[]
+  sprints          Sprint[]
 
   @@index([userId])
+  @@index([visibility])
+}
+
+// Tracks each writing session's word count for a project
+model ProjectWordLog {
+  id          Int      @id @default(autoincrement())
+  projectId   Int
+  userId      Int
+  wordsAdded  Int
+  loggedAt    DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([loggedAt])
+}
+
+// Tracks each chapter/scene progress entry
+model ProjectProgressLog {
+  id             Int      @id @default(autoincrement())
+  projectId      Int
+  userId         Int
+  chaptersAdded  Int      @default(0)
+  scenesAdded    Int      @default(0)
+  loggedAt       DateTime @default(now())
+
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([loggedAt])
+}
+
+// Tracks each writing session event
+model ProjectSessionLog {
+  id         Int      @id @default(autoincrement())
+  projectId  Int
+  userId     Int
+  loggedAt   DateTime @default(now())
+
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([loggedAt])
+}
+
+model Todolist {
+  id           Int      @id @default(autoincrement())
+  task         String
+  index        Int
+  markComplete Boolean  @default(false)   
+  projectId    Int                       
+  userId       Int
+  createdAt    DateTime @default(now())
+
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([projectId])
+  @@index([index])
+}
+
+model Note {
+  id        Int      @id @default(autoincrement())
+  title     String?
+  note      String
+  projectId Int                            
+  userId    Int
+  createdAt DateTime @default(now())
+
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([createdAt])
 }
 
 // ─── GROUP SPRINT ─────────────────────────────────────────────
-
 model GroupSprint {
-  id                Int       @id @default(autoincrement())
+  id                Int        @id @default(autoincrement())
   userId            Int
   duration          Int
-  totalWordsWritten Int       @default(0)
+  totalWordsWritten Int        @default(0)
   liveKitRoomName   String?
-  startedAt         DateTime  @default(now())
+  visibility        Visibility @default(PUBLIC) 
+  sprintType        SprintType @default(WRITING) 
+  startedAt         DateTime   @default(now())
   completedAt       DateTime?
-  isActive          Boolean   @default(true)
+  isActive          Boolean    @default(true)
 
   sprints           Sprint[]
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([isActive])
   @@index([startedAt])
+  @@index([visibility])                           
 }
 
 // Stripped down — only tracks who is inside a group sprint
@@ -84,6 +188,7 @@ model Sprint {
   userId        Int
   groupSprintId Int?
   soundscapeId  Int?
+  projectId     Int?
   checkin       String?
   startWords    Int          @default(0)
   wordsWritten  Int          @default(0)
@@ -95,6 +200,7 @@ model Sprint {
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   groupSprint   GroupSprint? @relation(fields: [groupSprintId], references: [id], onDelete: SetNull)
   soundscape    Soundscape?  @relation(fields: [soundscapeId], references: [id], onDelete: SetNull)
+  project       Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([groupSprintId])
@@ -402,4 +508,27 @@ enum Role {
 enum SnippetSource {
   POST_SPRINT
   STANDALONE
+}
+
+enum SessionGoalType {
+  DAILY    
+  WEEKLY
+  MONTHLY
+}
+
+enum Visibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum SprintType {
+  WRITING
+  READING
+}
+
+enum ProjectStatus {
+  IN_PROGRESS
+  COMPLETED
+  ON_HOLD
+  ABANDONED
 }

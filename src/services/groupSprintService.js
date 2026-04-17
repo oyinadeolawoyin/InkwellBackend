@@ -1,11 +1,9 @@
 const prisma = require("../config/prismaClient");
 
 // ─── GROUP SPRINT ─────────────────────────────────────────────
-
-async function startGroupSprint(userId, duration) {
-  // soundscape is no longer on GroupSprint — each member picks their own
+async function startGroupSprint(userId, duration, visibility = "PUBLIC", sprintType = "WRITING") {
   const groupSprint = await prisma.groupSprint.create({
-    data: { userId, duration }
+    data: { userId, duration, visibility, sprintType }
   });
 
   return prisma.groupSprint.update({
@@ -13,6 +11,7 @@ async function startGroupSprint(userId, duration) {
     data: { liveKitRoomName: `sprint-${groupSprint.id}` }
   });
 }
+
 
 async function endGroupSprint(groupSprintId) {
   await prisma.sprint.updateMany({
@@ -36,14 +35,15 @@ async function fetchGroupSprint(groupSprintId) {
   return prisma.groupSprint.findFirst({
     where: { id: groupSprintId },
     include: {
-        sprints: {
-          include: {
-            user: { select: { username: true, avatar: true, discordId: true } },
-            soundscape: {
-              select: { id: true, name: true, fileUrl: true, creatorName: true }
-            }
-          }
-        },
+      sprints: {
+        include: {
+          user: { select: { username: true, avatar: true, discordId: true } },
+          soundscape: {
+            select: { id: true, name: true, fileUrl: true, creatorName: true }
+          },
+          project: { select: { id: true, title: true } }
+        }
+      },
       _count: { select: { sprints: true } },
       user: { select: { username: true, avatar: true } }
     }
@@ -53,7 +53,7 @@ async function fetchGroupSprint(groupSprintId) {
 async function fetchAllActiveGroupSprints({ take, skip }) {
   const [groupSprints, total] = await prisma.$transaction([
     prisma.groupSprint.findMany({
-      where: { isActive: true },
+      where: { isActive: true, visibility: "PUBLIC" }, // only PUBLIC sprints in the global list
       skip,
       take,
       orderBy: { startedAt: "desc" },
@@ -68,7 +68,7 @@ async function fetchAllActiveGroupSprints({ take, skip }) {
         _count: { select: { sprints: true } }
       }
     }),
-    prisma.groupSprint.count({ where: { isActive: true } })
+    prisma.groupSprint.count({ where: { isActive: true, visibility: "PUBLIC" } })
   ]);
 
   return { groupSprints, total };
@@ -96,8 +96,8 @@ async function fetchLastGroupSprint() {
 
 // ─── SPRINT ───────────────────────────────────────────────────
 
-// soundscapeId is now part of join — each member picks their own
-async function joinSprint(userId, groupSprintId, checkin, startWords, soundscapeId) {
+// projectId is now part of join — each member can optionally link their project
+async function joinSprint(userId, groupSprintId, checkin, startWords, soundscapeId, projectId) {
   const existing = await prisma.sprint.findFirst({
     where: { userId, groupSprintId, isActive: true }
   });
@@ -111,11 +111,13 @@ async function joinSprint(userId, groupSprintId, checkin, startWords, soundscape
       checkin,
       startWords: startWords || 0,
       soundscapeId: soundscapeId || null,
+      projectId: projectId || null,
     },
     include: {
       soundscape: {
         select: { id: true, name: true, fileUrl: true, creatorName: true }
-      }
+      },
+      project: { select: { id: true, title: true } }
     }
   });
 }
@@ -123,7 +125,7 @@ async function joinSprint(userId, groupSprintId, checkin, startWords, soundscape
 async function checkoutSprint(sprintId, currentWordCount) {
   const existing = await prisma.sprint.findUnique({
     where: { id: sprintId },
-    select: { startWords: true, userId: true, groupSprintId: true }
+    select: { startWords: true, userId: true, groupSprintId: true, projectId: true }
   });
 
   if (!existing) throw new Error("Sprint not found");
@@ -137,6 +139,7 @@ async function checkoutSprint(sprintId, currentWordCount) {
     data: { wordsWritten, deletedWords, completedAt: new Date(), isActive: false }
   });
 
+  // ── Update group sprint total ──────────────────────────────
   if (existing.groupSprintId) {
     const allSprints = await prisma.sprint.findMany({
       where: { groupSprintId: existing.groupSprintId },
@@ -149,6 +152,32 @@ async function checkoutSprint(sprintId, currentWordCount) {
     });
   }
 
+  // ── Auto-log words to linked project ──────────────────────
+  // Only log if this was a writing sprint and words were actually written
+  if (existing.projectId && wordsWritten > 0) {
+    // Verify the project belongs to this user before writing
+    const project = await prisma.project.findFirst({
+      where: { id: existing.projectId, userId: existing.userId },
+      select: { id: true, currentWordCount: true }
+    });
+
+    if (project) {
+      await prisma.$transaction([
+        prisma.project.update({
+          where: { id: project.id },
+          data: { currentWordCount: { increment: wordsWritten } }
+        }),
+        prisma.projectWordLog.create({
+          data: {
+            projectId: project.id,
+            userId: existing.userId,
+            wordsAdded: wordsWritten,
+          }
+        })
+      ]);
+    }
+  }
+
   return sprint;
 }
 
@@ -159,7 +188,8 @@ async function fetchLoginUserSprint(userId) {
       user: { select: { username: true, avatar: true } },
       soundscape: {
         select: { id: true, name: true, fileUrl: true, creatorName: true }
-      }
+      },
+      project: { select: { id: true, title: true } }
     }
   });
 }

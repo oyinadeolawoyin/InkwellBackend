@@ -142,7 +142,7 @@ async function getComments(snippetId, { page = 1, limit = 20 } = {}) {
       orderBy: { createdAt: "asc" },
       include: {
         user: { select: AUTHOR_SELECT },
-        _count: { select: { replies: true } },
+        _count: { select: { replies: true, likes: true } },
       },
     }),
     prisma.snippetComment.count({ where: { snippetId } }),
@@ -156,7 +156,7 @@ async function addComment(snippetId, userId, content) {
     data: { snippetId, userId, content },
     include: {
       user: { select: AUTHOR_SELECT },
-      _count: { select: { replies: true } },
+      _count: { select: { replies: true, likes: true } },
     },
   });
 }
@@ -183,7 +183,10 @@ async function getReplies(commentId, { page = 1, limit = 20 } = {}) {
       skip,
       take: limit,
       orderBy: { createdAt: "asc" },
-      include: { user: { select: AUTHOR_SELECT } },
+      include: {
+        user: { select: AUTHOR_SELECT },
+        _count: { select: { likes: true } },
+      },
     }),
     prisma.snippetReply.count({ where: { commentId } }),
   ]);
@@ -194,7 +197,10 @@ async function getReplies(commentId, { page = 1, limit = 20 } = {}) {
 async function addReply(commentId, userId, content) {
   return prisma.snippetReply.create({
     data: { commentId, userId, content },
-    include: { user: { select: AUTHOR_SELECT } },
+    include: {
+      user: { select: AUTHOR_SELECT },
+      _count: { select: { likes: true } },
+    },
   });
 }
 

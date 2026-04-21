@@ -406,7 +406,24 @@ function calculateTrackerSummary(project, todayTotals = {}) {
 async function fetchPublicProjects() {
     return prisma.project.findMany({
         where: { visibility: "PUBLIC", status: "IN_PROGRESS" },
-        include: { user: { select: { username: true, avatar: true } } },
+        select: {
+            id:                  true,
+            title:               true,
+            genre:               true,
+            status:              true,
+            // progress numbers only — no notes, no tasks, no logs, no description
+            targetWordCount:     true,
+            currentWordCount:    true,
+            targetChapters:      true,
+            currentChapters:     true,
+            targetScenes:        true,
+            currentScenes:       true,
+            sessionGoalType:     true,
+            sessionGoalCount:    true,
+            currentSessionCount: true,
+            // author identity only
+            user: { select: { username: true, avatar: true } }
+        },
         orderBy: { updatedAt: "desc" }
     });
 }

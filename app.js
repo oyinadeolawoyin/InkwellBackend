@@ -1,4 +1,3 @@
-
 const express = require("express");
 require("dotenv").config();
 const app = express();
@@ -7,18 +6,19 @@ const cors = require("cors");
 const multer = require("multer");
 require("./jobs/writingPlanReminder.job");
 
-const authRoutes = require("./src/routes/authRoutes");
+const authRoutes        = require("./src/routes/authRoutes");
 const groupSprintRoutes = require("./src/routes/groupSprintRoutes");
-const projectRoutes = require("./src/routes/projectRoutes");
-const userRoutes = require("./src/routes/userRoutes");
-const quoteRoutes = require("./src/routes/quoteRoutes");
+const projectRoutes     = require("./src/routes/projectRoutes");
+const userRoutes        = require("./src/routes/userRoutes");
+const quoteRoutes       = require("./src/routes/quoteRoutes");
 const notificationRoutes = require("./src/routes/notificationRoutes");
-const blogRoutes = require("./src/routes/blogRoutes");
-const snippetRoutes = require("./src/routes/snippetroutes");
-const scheduleRoutes = require("./src/routes/scheduleroutes");
+const blogRoutes        = require("./src/routes/blogRoutes");
+const snippetRoutes     = require("./src/routes/snippetroutes");
+const scheduleRoutes    = require("./src/routes/scheduleroutes");
 const soundscapesRoutes = require("./src/routes/soundscaperoutes");
-const todolistRoutes = require("./src/routes/todolistRoutes");
-const notesRoutes = require("./src/routes/noteRoutes");
+const todolistRoutes    = require("./src/routes/todolistRoutes");
+const notesRoutes       = require("./src/routes/noteRoutes");
+const feedbackRoutes    = require("./src/routes/feedbackRoutes"); 
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -27,7 +27,7 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   "https://inkwell-inky-three.vercel.app",
-  "https://inkwellinky.vercel.app"
+  "https://inkwellinky.vercel.app",
 ];
 
 const corsOptions = {
@@ -41,23 +41,22 @@ const corsOptions = {
   credentials: true,
 };
 
-// Enable CORS globally
 app.use(cors(corsOptions));
-
 app.use(cookieParser());
 
-app.use("/api/auth", authRoutes);
-app.use("/api/sprint", groupSprintRoutes);
-app.use("/api/projects", projectRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/quote", quoteRoutes);
+app.use("/api/auth",          authRoutes);
+app.use("/api/sprint",        groupSprintRoutes);
+app.use("/api/projects",      projectRoutes);
+app.use("/api/users",         userRoutes);
+app.use("/api/quote",         quoteRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/blog", blogRoutes);
-app.use("/api/snippets", snippetRoutes);
-app.use("/api/schedule", scheduleRoutes);
-app.use("/api/soundscapes", soundscapesRoutes);
-app.use("/api/todos", todolistRoutes);
-app.use("/api/notes", notesRoutes);
+app.use("/api/blog",          blogRoutes);
+app.use("/api/snippets",      snippetRoutes);
+app.use("/api/schedule",      scheduleRoutes);
+app.use("/api/soundscapes",   soundscapesRoutes);
+app.use("/api/todos",         todolistRoutes);
+app.use("/api/notes",         notesRoutes);
+app.use("/api/feedback",      feedbackRoutes); // ← NEW
 
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError || err.message === "Unsupported file type") {

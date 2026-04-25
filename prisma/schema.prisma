@@ -8,13 +8,17 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// USER
+// ─────────────────────────────────────────────────────────────────────────────
+
 model User {
   id               Int       @id @default(autoincrement())
   username         String    @unique
-  email            String?    @unique
+  email            String?   @unique
   password         String?
-  discordId        String?  @unique  
-  createdVia       String   @default("site") 
+  discordId        String?   @unique
+  createdVia       String    @default("site")
   avatar           String?
   bio              String?
   role             Role      @default(USER)
@@ -23,6 +27,7 @@ model User {
   resetToken       String?   @unique
   resetTokenExpiry DateTime?
 
+  // ── existing relations ──────────────────────────────────────────────────
   groupSprints        GroupSprint[]
   sprints             Sprint[]
   notification        Notification[]
@@ -45,40 +50,52 @@ model User {
   wallPostComments    WallPostComment[]
   wallPostReplies     WallPostReply[]
   soundscapes         Soundscape[]
+
+  // ── feedback hub relations ──────────────────────────────────────────────
+  feedbackPoints              FeedbackPoint?
+  feedbackSubmissions         FeedbackSubmission[]
+  feedbackResponses           FeedbackResponse[]
+  paragraphComments           ParagraphComment[]
+  paragraphCommentReplies     ParagraphCommentReply[]
+  paragraphCommentUpvotes     ParagraphCommentUpvote[]
+  feedbackResponseUpvotes     FeedbackResponseUpvote[]
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT
+// ─────────────────────────────────────────────────────────────────────────────
 
 model Project {
   id               Int       @id @default(autoincrement())
   userId           Int
   title            String
   description      String?
-  link             String?                  // make optional — not all projects need a link
+  link             String?
   genre            String?
-  visibility       Visibility @default(PRIVATE)  // new: public or private
-  targetWordCount  Int?                     // e.g. 80,000
-  currentWordCount Int       @default(0)   // updated as writer logs progress
-  // ─── Chapter / Scene Tracker ──────────────────
-  targetChapters      Int?              // e.g. 30 chapters total
+  visibility       Visibility @default(PRIVATE)
+  targetWordCount  Int?
+  currentWordCount Int        @default(0)
+
+  targetChapters      Int?
   currentChapters     Int    @default(0)
-  targetScenes        Int?              // e.g. 90 scenes total
+  targetScenes        Int?
   currentScenes       Int    @default(0)
 
-  // ─── Session Habit Tracker ────────────────────
-  sessionGoalType     SessionGoalType?  // WEEKLY or MONTHLY
-  sessionGoalCount    Int?              // e.g. 5 sessions per week/month
-  currentSessionCount Int    @default(0) // resets when period rolls over
-  lastSessionReset    DateTime?         // tracks when the count last reset
+  sessionGoalType     SessionGoalType?
+  sessionGoalCount    Int?
+  currentSessionCount Int    @default(0)
+  lastSessionReset    DateTime?
 
-  deadline         DateTime?               // when do they want to finish?
-  daysPerWeek      Int @default(5)               // how many days/week they plan to write
+  deadline         DateTime?
+  daysPerWeek      Int           @default(5)
   status           ProjectStatus @default(IN_PROGRESS)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  wordLogs         ProjectWordLog[]        
-  progressLogs     ProjectProgressLog[]  
-  sessionLogs      ProjectSessionLog[] 
+  wordLogs         ProjectWordLog[]
+  progressLogs     ProjectProgressLog[]
+  sessionLogs      ProjectSessionLog[]
   todolists        Todolist[]
   notes            Note[]
   sprints          Sprint[]
@@ -87,7 +104,6 @@ model Project {
   @@index([visibility])
 }
 
-// Tracks each writing session's word count for a project
 model ProjectWordLog {
   id          Int      @id @default(autoincrement())
   projectId   Int
@@ -101,7 +117,6 @@ model ProjectWordLog {
   @@index([loggedAt])
 }
 
-// Tracks each chapter/scene progress entry
 model ProjectProgressLog {
   id             Int      @id @default(autoincrement())
   projectId      Int
@@ -116,7 +131,6 @@ model ProjectProgressLog {
   @@index([loggedAt])
 }
 
-// Tracks each writing session event
 model ProjectSessionLog {
   id         Int      @id @default(autoincrement())
   projectId  Int
@@ -129,18 +143,22 @@ model ProjectSessionLog {
   @@index([loggedAt])
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TODOLIST & NOTES
+// ─────────────────────────────────────────────────────────────────────────────
+
 model Todolist {
   id           Int      @id @default(autoincrement())
   task         String
   index        Int
-  markComplete Boolean  @default(false)   
-  projectId    Int                       
+  markComplete Boolean  @default(false)
+  projectId    Int
   userId       Int
   createdAt    DateTime @default(now())
 
   project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([projectId])
   @@index([index])
 }
@@ -149,26 +167,29 @@ model Note {
   id        Int      @id @default(autoincrement())
   title     String?
   note      String
-  projectId Int                            
+  projectId Int
   userId    Int
   createdAt DateTime @default(now())
 
   project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
   @@index([createdAt])
 }
 
-// ─── GROUP SPRINT ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// GROUP SPRINT & SPRINT
+// ─────────────────────────────────────────────────────────────────────────────
+
 model GroupSprint {
   id                Int        @id @default(autoincrement())
   userId            Int
   duration          Int
   totalWordsWritten Int        @default(0)
   liveKitRoomName   String?
-  visibility        Visibility @default(PUBLIC) 
-  sprintType        SprintType @default(WRITING) 
+  visibility        Visibility @default(PUBLIC)
+  sprintType        SprintType @default(WRITING)
   startedAt         DateTime   @default(now())
   completedAt       DateTime?
   isActive          Boolean    @default(true)
@@ -179,10 +200,9 @@ model GroupSprint {
   @@index([userId])
   @@index([isActive])
   @@index([startedAt])
-  @@index([visibility])                           
+  @@index([visibility])
 }
 
-// Stripped down — only tracks who is inside a group sprint
 model Sprint {
   id            Int          @id @default(autoincrement())
   userId        Int
@@ -200,7 +220,7 @@ model Sprint {
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   groupSprint   GroupSprint? @relation(fields: [groupSprintId], references: [id], onDelete: SetNull)
   soundscape    Soundscape?  @relation(fields: [soundscapeId], references: [id], onDelete: SetNull)
-  project       Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  project       Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([groupSprintId])
@@ -208,7 +228,9 @@ model Sprint {
   @@index([soundscapeId])
 }
 
-// ─── SOUNDSCAPE ───────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// SOUNDSCAPE
+// ─────────────────────────────────────────────────────────────────────────────
 
 model Soundscape {
   id            Int       @id @default(autoincrement())
@@ -226,7 +248,9 @@ model Soundscape {
   @@index([isApproved])
 }
 
-// ─── WEEKLY SESSION SCHEDULE ──────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// WEEKLY SCHEDULE
+// ─────────────────────────────────────────────────────────────────────────────
 
 model WeeklySchedule {
   id          Int      @id @default(autoincrement())
@@ -260,7 +284,9 @@ model ScheduledSession {
   @@index([isDone])
 }
 
-// ─── WRITING SNIPPET ──────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// WRITING SNIPPET
+// ─────────────────────────────────────────────────────────────────────────────
 
 model WritingSnippet {
   id         Int           @id @default(autoincrement())
@@ -298,7 +324,6 @@ model SnippetComment {
   createdAt DateTime       @default(now())
 
   likes     SnippetCommentLike[]
-
   user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   snippet   WritingSnippet @relation(fields: [snippetId], references: [id], onDelete: Cascade)
   replies   SnippetReply[]
@@ -315,7 +340,6 @@ model SnippetReply {
   createdAt DateTime       @default(now())
 
   likes     SnippetReplyLike[]
-
   user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   comment   SnippetComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
@@ -345,7 +369,9 @@ model SnippetReplyLike {
   @@index([replyId])
 }
 
-// ─── EXISTING MODELS (KEPT) ───────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// QUOTES, SUBSCRIPTIONS, NOTIFICATIONS
+// ─────────────────────────────────────────────────────────────────────────────
 
 model Quote {
   id        Int         @id @default(autoincrement())
@@ -387,6 +413,10 @@ model Notification {
   @@index([userId])
   @@index([userId, read])
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLOG
+// ─────────────────────────────────────────────────────────────────────────────
 
 model BlogPost {
   id        Int            @id @default(autoincrement())
@@ -439,6 +469,10 @@ model BlogReply {
   @@index([commentId])
   @@index([authorId])
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WALL POST
+// ─────────────────────────────────────────────────────────────────────────────
 
 model WallPost {
   id        Int      @id @default(autoincrement())
@@ -496,7 +530,158 @@ model WallPostReply {
   @@index([userId])
 }
 
-// ─── ENUMS ────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// FEEDBACK HUB
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Tracks how many unique users have ever posted a submission.
+// Used to grant the first 5 posters a free pass (no points required).
+model FeedbackHubBootstrap {
+  id        Int      @id @default(autoincrement())
+  // total distinct users who have ever submitted — only increments, never decrements
+  posterCount Int    @default(0)
+
+  // Singleton row — always id = 1
+  @@map("feedback_hub_bootstrap")
+}
+
+// ─── Point wallet ────────────────────────────────────────────────────────────
+
+model FeedbackPoint {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @unique
+  postingBalance Int      @default(5)   // spendable — goes up and down
+  reputation     Int      @default(5)   // lifetime total — only ever goes up
+  // tracks whether this user has already used their bootstrap free post
+  usedFreePost   Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── Submission (chapter posted for feedback) ─────────────────────────────────
+
+model FeedbackSubmission {
+  id               Int             @id @default(autoincrement())
+  userId           Int
+  title            String
+  genre            String
+  summary          String          // 25–60 words enforced in service
+  content          String          // full chapter text
+  wordCountTier    WordCountTier
+  actualWordCount  Int             // counted server-side on submit
+  draftStage       DraftStage
+  contentWarnings  String[]
+  feedbackWanted   String[]        // free-text tags from writer
+  pointsCost       Int             // 0 if bootstrap free post, else 10/20/30/40
+  wasFreePost      Boolean         @default(false)
+  isOpen           Boolean         @default(true)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  responses         FeedbackResponse[]
+  paragraphComments ParagraphComment[]
+
+  @@index([userId])
+  @@index([isOpen])
+  @@index([createdAt])
+  @@index([genre])
+}
+
+// ─── Full critique (ratings + general feedback) ───────────────────────────────
+
+model FeedbackResponse {
+  id                  Int                @id @default(autoincrement())
+  submissionId        Int
+  criticId            Int
+  overallRating       Int                // 1–5
+  clarityRating       Int                // 1–5
+  pacingRating        Int                // 1–5
+  believabilityRating Int                // 1–5
+  generalFeedback     String             // ≥100 words enforced in service
+  pointsEarned        Int
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  submission  FeedbackSubmission     @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  critic      User                   @relation(fields: [criticId], references: [id], onDelete: Cascade)
+  upvotes     FeedbackResponseUpvote[]
+
+  // One full response per critic per submission
+  @@unique([submissionId, criticId])
+  @@index([submissionId])
+  @@index([criticId])
+}
+
+// Upvote on a full critique — submission author only, gives critic +3 pts
+model FeedbackResponseUpvote {
+  id         Int              @id @default(autoincrement())
+  userId     Int
+  responseId Int
+  createdAt  DateTime         @default(now())
+
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  response   FeedbackResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, responseId])
+  @@index([responseId])
+}
+
+// ─── Paragraph comment ────────────────────────────────────────────────────────
+
+model ParagraphComment {
+  id             Int                @id @default(autoincrement())
+  submissionId   Int
+  authorId       Int
+  paragraphIndex Int                // 0-based paragraph position
+  content        String
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  submission  FeedbackSubmission     @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  author      User                   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  upvotes     ParagraphCommentUpvote[]
+  replies     ParagraphCommentReply[]
+
+  @@index([submissionId])
+  @@index([submissionId, paragraphIndex])
+  @@index([authorId])
+}
+
+// Upvote on a paragraph comment — any user except comment author, gives author +3 pts
+model ParagraphCommentUpvote {
+  id        Int              @id @default(autoincrement())
+  userId    Int
+  commentId Int
+  createdAt DateTime         @default(now())
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment   ParagraphComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, commentId])
+  @@index([commentId])
+}
+
+// One-level reply on a paragraph comment (no nested threading)
+model ParagraphCommentReply {
+  id        Int              @id @default(autoincrement())
+  commentId Int
+  authorId  Int
+  content   String
+  createdAt DateTime         @default(now())
+
+  comment   ParagraphComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  author    User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([commentId])
+  @@index([authorId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
 
 enum Role {
   USER
@@ -511,7 +696,7 @@ enum SnippetSource {
 }
 
 enum SessionGoalType {
-  DAILY    
+  DAILY
   WEEKLY
   MONTHLY
 }
@@ -531,4 +716,17 @@ enum ProjectStatus {
   COMPLETED
   ON_HOLD
   ABANDONED
+}
+
+enum DraftStage {
+  ROUGH      // be gentle
+  POLISHING  // be honest
+  FINAL_EDIT // be ruthless
+}
+
+enum WordCountTier {
+  TIER_1000  // ≤1,000 words — costs/earns 10 pts
+  TIER_2000  // ≤2,000 words — costs/earns 20 pts
+  TIER_3000  // ≤3,000 words — costs/earns 30 pts
+  TIER_4000  // ≤4,000 words — costs/earns 40 pts
 }

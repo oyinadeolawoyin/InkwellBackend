@@ -1,10 +1,11 @@
 require("dotenv").config();
-const bcrypt = require("bcryptjs");
-const jwt = require("../config/jwt")
+const bcrypt      = require("bcryptjs");
+const jwt         = require("../config/jwt");
 const authService = require("../services/authService");
 const userService = require("../services/userService");
+const { initWallet } = require("../services/pointService"); 
 const { validationResult } = require("express-validator");
-const crypto = require("crypto");
+const crypto      = require("crypto");
 const { sendEmail } = require("../config/mailer");
 
 // ============================================
@@ -15,11 +16,10 @@ const isProduction = process.env.NODE_ENV === "production";
 
 const cookieOptions = {
   httpOnly: true,
-  secure: isProduction,
+  secure:   isProduction,
   sameSite: isProduction ? "none" : "lax",
-  maxAge: 1000 * 60 * 60 * 24 * 21,
+  maxAge:   1000 * 60 * 60 * 24 * 21,
 };
-
 
 // ============================================
 // AUTHENTICATION OPERATIONS
@@ -59,13 +59,17 @@ async function signup(req, res) {
       password: hashedPassword,
       email,
       timezone,
-      role: isPremiumEligible ? "FOUNDING_WRITER" : "USER"
+      role: isPremiumEligible ? "FOUNDING_WRITER" : "USER",
     });
+
+    // ── Seed the feedback hub wallet for every new user ─────────────────────
+    // Gives them 5 pts — enough to browse but not enough to post yet.
+    await initWallet(user.id);
 
     const token = jwt.generateToken(user);
     res.cookie("token", token, cookieOptions).status(201).json({
       token,
-      user: { id: user.id, username: user.username, email: user.email, role: user.role }
+      user: { id: user.id, username: user.username, email: user.email, role: user.role },
     });
   } catch (error) {
     console.error("Signup error:", error);
@@ -80,9 +84,6 @@ async function signup(req, res) {
  *   1. Email + password  (site-registered users)
  *   2. Discord ID + password  (users auto-created via Discord bot)
  *
- * The client sends { identifier, password } where identifier is either
- * an email address or a numeric Discord ID string.
- *
  * @route POST /auth/login
  */
 async function login(req, res) {
@@ -95,7 +96,6 @@ async function login(req, res) {
   try {
     let user = null;
 
-    // Determine whether identifier is a Discord ID (17–20 digit string) or email
     const isDiscordId = /^\d{17,20}$/.test(identifier.trim());
 
     if (isDiscordId) {
@@ -110,7 +110,6 @@ async function login(req, res) {
       }
     }
 
-    // Account has no password set yet (Discord-only, never set a password)
     if (!user.password) {
       return res.status(400).json({
         message: "This account doesn't have a password yet. Please go to Settings to set one first.",
@@ -125,7 +124,13 @@ async function login(req, res) {
     const token = jwt.generateToken(user);
     res.cookie("token", token, cookieOptions).status(200).json({
       token,
-      user: { id: user.id, username: user.username, email: user.email, role: user.role, discordId: user.discordId }
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        discordId: user.discordId,
+      },
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -138,11 +143,7 @@ async function login(req, res) {
  * @route POST /auth/logout
  */
 function logout(req, res) {
-  res.clearCookie("token", {
-    httpOnly: true,
-    secure: true,
-    sameSite: "none",
-  });
+  res.clearCookie("token", { httpOnly: true, secure: true, sameSite: "none" });
   res.status(200).json({ message: "Logged out successfully" });
 }
 
@@ -152,8 +153,7 @@ function logout(req, res) {
  */
 async function getMe(req, res) {
   try {
-    const user = req.user;
-    res.status(200).json(user);
+    res.status(200).json(req.user);
   } catch (error) {
     console.error("Get me error:", error);
     res.status(500).json({ message: "Failed to fetch user" });
@@ -162,11 +162,6 @@ async function getMe(req, res) {
 
 /**
  * Change or set a password for the authenticated user.
- *
- * Two cases:
- *   - User already has a password → requires currentPassword for verification
- *   - Discord-only user (no password yet) → sets password directly, no currentPassword needed
- *
  * @route PATCH /auth/changePassword
  */
 async function changePassword(req, res) {
@@ -177,11 +172,12 @@ async function changePassword(req, res) {
     return res.status(400).json({ message: "New password must be at least 8 characters." });
   }
 
-  // Basic strength check
-  if (!/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) ||
-      !/[0-9]/.test(newPassword) || !/[\W_]/.test(newPassword)) {
+  if (
+    !/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) ||
+    !/[0-9]/.test(newPassword) || !/[\W_]/.test(newPassword)
+  ) {
     return res.status(400).json({
-      message: "Password must contain uppercase, lowercase, a number, and a special character."
+      message: "Password must contain uppercase, lowercase, a number, and a special character.",
     });
   }
 
@@ -189,7 +185,6 @@ async function changePassword(req, res) {
     const existingUser = await userService.fetchUser(userId);
 
     if (existingUser.password) {
-      // User already has a password — verify the current one first
       if (!currentPassword) {
         return res.status(400).json({ message: "Please provide your current password." });
       }
@@ -198,7 +193,6 @@ async function changePassword(req, res) {
         return res.status(401).json({ message: "Current password is incorrect." });
       }
     }
-    // else: Discord-only account, no current password required — just set the new one
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     const updatedUser = await authService.updatePassword(userId, hashedPassword);
@@ -214,7 +208,6 @@ async function changePassword(req, res) {
     res.status(500).json({ message: "Something went wrong. Please try again." });
   }
 }
-
 
 // ============================================
 // PASSWORD RESET OPERATIONS
@@ -234,12 +227,11 @@ async function forgetPassword(req, res) {
   try {
     const user = await authService.findUserByEmail(email);
 
-    // Generic response to prevent email enumeration
     if (!user) {
       return res.status(200).json({ message: "If an account exists, a reset email has been sent." });
     }
 
-    const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetToken      = crypto.randomBytes(32).toString("hex");
     const resetTokenExpiry = new Date(Date.now() + 15 * 60 * 1000);
 
     await authService.saveResetToken(user.id, resetToken, resetTokenExpiry);

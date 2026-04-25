@@ -1,0 +1,53 @@
+// src/routes/feedbackRoutes.js
+const express  = require("express");
+const router   = express.Router();
+const ctrl     = require("../controllers/feedbackController");
+const notifCtrl = require("../controllers/notificationController");
+
+const { authenticateJWT, optionalJWT } = require("../config/jwt");
+
+// ─── POINTS ──────────────────────────────────────────────────────────────────
+
+router.get("/points/me",          authenticateJWT, ctrl.getMyWallet);
+router.get("/points/:userId",     optionalJWT,     ctrl.getUserWallet);
+
+// ─── SUBMISSIONS ─────────────────────────────────────────────────────────────
+
+router.get("/submissions/mine",         authenticateJWT, ctrl.getUserSubmissions);
+router.get("/submissions",              optionalJWT,     ctrl.getSubmissions);
+router.get("/submissions/:id",          optionalJWT,     ctrl.getSubmissionById);
+router.post("/submissions",             authenticateJWT, ctrl.createSubmission);
+router.patch("/submissions/:id/close",  authenticateJWT, ctrl.closeSubmission);
+router.delete("/submissions/:id",       authenticateJWT, ctrl.deleteSubmission);
+
+// ─── FEEDBACK RESPONSES (full critiques) ─────────────────────────────────────
+
+router.post("/submissions/:id/responses",    authenticateJWT, ctrl.createResponse);
+router.patch("/responses/:responseId",       authenticateJWT, ctrl.updateResponse);
+router.post("/responses/:responseId/upvote", authenticateJWT, ctrl.toggleResponseUpvote);
+
+// ─── PARAGRAPH COMMENTS ──────────────────────────────────────────────────────
+
+router.post("/submissions/:id/comments",     authenticateJWT, ctrl.createParagraphComment);
+router.get("/submissions/:id/comments",      optionalJWT,     ctrl.getParagraphComments);
+router.patch("/comments/:commentId",         authenticateJWT, ctrl.updateParagraphComment);
+router.delete("/comments/:commentId",        authenticateJWT, ctrl.deleteParagraphComment);
+router.post("/comments/:commentId/upvote",   authenticateJWT, ctrl.toggleParagraphCommentUpvote);
+
+// ─── PARAGRAPH COMMENT REPLIES ───────────────────────────────────────────────
+
+router.post("/comments/:commentId/replies",            authenticateJWT, ctrl.createParagraphCommentReply);
+router.delete("/comments/:commentId/replies/:replyId", authenticateJWT, ctrl.deleteParagraphCommentReply);
+
+// ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
+
+// Subscribe browser for push notifications (PWA)
+router.post("/notifications/subscribe",  authenticateJWT, notifCtrl.saveSubscription);
+
+// Fetch all notifications for the current user
+router.get("/notifications",             authenticateJWT, notifCtrl.getNotifications);
+
+// Mark a specific notification as read
+router.patch("/notifications/:id/read",  authenticateJWT, notifCtrl.markRead);
+
+module.exports = router;

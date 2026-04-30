@@ -4,7 +4,7 @@ const prisma = require("../config/prismaClient");
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
 const BOOTSTRAP_FREE_SLOTS = 3;   // first 3 unique users to post get a free pass (was 5)
-const NEW_MEMBER_SEED      = 5;   // posting pts every new member starts with
+const NEW_MEMBER_SEED      = 2;   // posting pts every new member starts with
 
 // Points earned per critique = 5 pts per 500 words
 // Same value doubles as the posting cost — you pay what you'd earn by critiquing.
@@ -16,7 +16,7 @@ const TIER_COSTS = {
 };
 
 // Full-critique upvote: flat +3 pts per upvote (posting balance + reputation)
-const CRITIQUE_UPVOTE_BONUS = 3;
+const CRITIQUE_UPVOTE_BONUS = 2;
 
 // Paragraph comment upvotes: milestone-based — 1 pt per every 2 upvotes
 // e.g. 2 upvotes → 1 pt, 4 upvotes → 2 pts, 6 upvotes → 3 pts
@@ -31,6 +31,15 @@ const TIERS = [
   { name: "Platinum", min: 700,  max: 1499,     gem: "P", color: "#7F77DD" },
   { name: "Diamond",  min: 1500, max: Infinity,  gem: "D", color: "#D85A30" },
 ];
+
+// This function determines if they get full or half points
+function calculateCritiquePoints(wordCountTier, isOutdated) {
+  // Use the existing TIER_COSTS mapping (10, 20, 30, 40)
+  const points = TIER_COSTS[wordCountTier] || 10;
+  
+  // If the work is already in the archive (outdated), give 50% points
+  return isOutdated ? points / 2 : points;
+}
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -133,17 +142,32 @@ async function deductPostingCost(userId, wordCountTier, tx = prisma) {
 // ONLY postingBalance increases — reputation is NOT touched.
 // Reputation is built exclusively through upvotes received.
 
-async function awardCritiquePoints(criticId, wordCountTier, tx = prisma) {
-  const earned = getTierCost(wordCountTier);
+// async function awardCritiquePoints(criticId, wordCountTier, tx = prisma) {
+//   const earned = getTierCost(wordCountTier);
+//   return tx.feedbackPoint.upsert({
+//     where:  { userId: criticId },
+//     update: {
+//       postingBalance: { increment: earned },
+//       // ⚠ reputation intentionally NOT incremented here
+//     },
+//     create: {
+//       userId:         criticId,
+//       postingBalance: NEW_MEMBER_SEED + earned,
+//       reputation:     0,
+//     },
+//   });
+// }
+
+// Updated to take the actual points calculated above
+async function awardCritiquePoints(criticId, pointsToAward, tx = prisma) {
   return tx.feedbackPoint.upsert({
     where:  { userId: criticId },
     update: {
-      postingBalance: { increment: earned },
-      // ⚠ reputation intentionally NOT incremented here
+      postingBalance: { increment: pointsToAward },
     },
     create: {
       userId:         criticId,
-      postingBalance: NEW_MEMBER_SEED + earned,
+      postingBalance: NEW_MEMBER_SEED + pointsToAward,
       reputation:     0,
     },
   });
@@ -235,6 +259,7 @@ module.exports = {
   PARAGRAPH_UPVOTE_PER_MILESTONE,
   BOOTSTRAP_FREE_SLOTS,
   TIERS,
+  calculateCritiquePoints,
   getTier,
   getTierCost,
   detectTierChange,

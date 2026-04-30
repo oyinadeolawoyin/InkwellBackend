@@ -1,68 +1,8 @@
 const prisma = require("../config/prismaClient");
 
-async function fetchProjects(userId) {
-    return prisma.project.findMany({
-        where: { userId }
-    });
-}
-
-async function createProject(
-    userId, title, description, link, genre, visibility,
-    targetWordCount, deadline, daysPerWeek,
-    targetChapters, targetScenes, sessionGoalType, sessionGoalCount
-) {
-    return prisma.project.create({
-        data: {
-            userId,
-            title,
-            description,
-            link,
-            genre,
-            visibility: visibility ?? "PRIVATE",
-            targetWordCount: targetWordCount ? Number(targetWordCount) : null,
-            deadline: deadline ? new Date(deadline) : null,
-            daysPerWeek: daysPerWeek ? Number(daysPerWeek) : 5,
-            targetChapters: targetChapters ? Number(targetChapters) : null,
-            targetScenes: targetScenes ? Number(targetScenes) : null,
-            sessionGoalType: sessionGoalType ?? null,
-            sessionGoalCount: sessionGoalCount ? Number(sessionGoalCount) : null,
-        }
-    });
-}
-
-async function updateProject(
-    projectId, userId, title, description, link, genre, visibility,
-    targetWordCount, deadline, daysPerWeek, status,
-    targetChapters, targetScenes, sessionGoalType, sessionGoalCount
-) {
-    const existing = await prisma.project.findUnique({ where: { id: projectId } });
-    if (!existing) throw new Error("PROJECT_NOT_FOUND");
-    if (existing.userId !== userId) throw new Error("UNAUTHORIZED");
-
-    return prisma.project.update({
-        where: { id: projectId },
-        data: {
-            title, description, link, genre, visibility,
-            targetWordCount: targetWordCount ? Number(targetWordCount) : null,
-            deadline: deadline ? new Date(deadline) : null,
-            daysPerWeek: daysPerWeek ? Number(daysPerWeek) : 5,
-            status,
-            targetChapters: targetChapters ? Number(targetChapters) : null,
-            targetScenes: targetScenes ? Number(targetScenes) : null,
-            sessionGoalType: sessionGoalType ?? null,
-            sessionGoalCount: sessionGoalCount ? Number(sessionGoalCount) : null,
-        }
-    });
-}
-
-async function deleteProject(projectId, userId) {
-    const project = await prisma.project.findUnique({ where: { id: projectId } });
-    if (!project) throw new Error("PROJECT_NOT_FOUND");
-    if (project.userId !== userId) throw new Error("UNAUTHORIZED");
-    return prisma.project.delete({ where: { id: projectId } });
-}
-
-// ─── HELPERS ──────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 
 function getWeekNumber(date) {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -72,12 +12,19 @@ function getWeekNumber(date) {
     return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
 }
 
+// Returns midnight UTC for today as a Date object.
 function startOfToday() {
     const now = new Date();
     return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
-// Generic daily target calculator — works for words, chapters, scenes
+// Converts any date to its UTC midnight (calendar-day key).
+function toUTCDay(date) {
+    const d = new Date(date);
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+// Generic daily target calculator — works for words, chapters, scenes.
 function calculateDailyTarget(target, current, deadline, daysPerWeek) {
     const remaining = target - current;
     if (remaining <= 0) return 0;
@@ -92,16 +39,119 @@ function calculateDailyTarget(target, current, deadline, daysPerWeek) {
     return Math.ceil(remaining / sessionsLeft);
 }
 
-// ─── PREVIEW DELETE (no DB writes — warn the writer first) ────
+// ─────────────────────────────────────────────────────────────────────────────
+// STREAK HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Calculates what the daily target WOULD become after a subtraction.
-// Call this before confirming a delete so the frontend can show a warning.
+// Returns the new streak value based on lastLogDate and whether today is already logged.
+// Rules:
+//   - lastLogDate is null → streak becomes 1 (first ever log)
+//   - lastLogDate is yesterday → streak increments
+//   - lastLogDate is today → no change (already logged today)
+//   - lastLogDate is older → missed a day, reset to 1
+function computeNewStreak(currentStreak, lastLogDate) {
+    const today = toUTCDay(new Date());
+
+    if (!lastLogDate) return 1;
+
+    const last = toUTCDay(lastLogDate);
+    const diffDays = Math.round((today - last) / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return currentStreak;        // already logged today, no change
+    if (diffDays === 1) return currentStreak + 1;    // yesterday → keep the chain going
+    return 1;                                        // missed one or more days → reset
+}
+
+// Returns true if a day was missed (streak needs to reset to 0 externally if needed).
+// Used by the breaker job — not called during logDay.
+function didMissDay(lastLogDate) {
+    if (!lastLogDate) return false;
+    const today = toUTCDay(new Date());
+    const last  = toUTCDay(lastLogDate);
+    const diffDays = Math.round((today - last) / (1000 * 60 * 60 * 24));
+    return diffDays > 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT CRUD
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function fetchProjects(userId) {
+    return prisma.project.findMany({
+        where: { userId }
+    });
+}
+
+async function createProject(
+    userId, title, description, link, genre, visibility,
+    targetWordCount, deadline, daysPerWeek,
+    targetChapters, targetScenes, sessionGoalType, sessionGoalCount,
+    phase, consecutiveDaysTarget
+) {
+    return prisma.project.create({
+        data: {
+            userId,
+            title,
+            description,
+            link,
+            genre,
+            visibility:           visibility ?? "PRIVATE",
+            phase:                phase ?? "DRAFTING",
+            targetWordCount:      targetWordCount      ? Number(targetWordCount)      : null,
+            deadline:             deadline             ? new Date(deadline)           : null,
+            daysPerWeek:          daysPerWeek          ? Number(daysPerWeek)          : 5,
+            targetChapters:       targetChapters       ? Number(targetChapters)       : null,
+            targetScenes:         targetScenes         ? Number(targetScenes)         : null,
+            sessionGoalType:      sessionGoalType      ?? null,
+            sessionGoalCount:     sessionGoalCount     ? Number(sessionGoalCount)     : null,
+            consecutiveDaysTarget: consecutiveDaysTarget ? Number(consecutiveDaysTarget) : null,
+        }
+    });
+}
+
+async function updateProject(
+    projectId, userId, title, description, link, genre, visibility,
+    targetWordCount, deadline, daysPerWeek, status,
+    targetChapters, targetScenes, sessionGoalType, sessionGoalCount,
+    phase, consecutiveDaysTarget
+) {
+    const existing = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!existing)               throw new Error("PROJECT_NOT_FOUND");
+    if (existing.userId !== userId) throw new Error("UNAUTHORIZED");
+
+    return prisma.project.update({
+        where: { id: projectId },
+        data: {
+            title, description, link, genre, visibility, status,
+            phase:                phase ?? existing.phase,
+            targetWordCount:      targetWordCount      ? Number(targetWordCount)      : null,
+            deadline:             deadline             ? new Date(deadline)           : null,
+            daysPerWeek:          daysPerWeek          ? Number(daysPerWeek)          : 5,
+            targetChapters:       targetChapters       ? Number(targetChapters)       : null,
+            targetScenes:         targetScenes         ? Number(targetScenes)         : null,
+            sessionGoalType:      sessionGoalType      ?? null,
+            sessionGoalCount:     sessionGoalCount     ? Number(sessionGoalCount)     : null,
+            consecutiveDaysTarget: consecutiveDaysTarget ? Number(consecutiveDaysTarget) : existing.consecutiveDaysTarget,
+        }
+    });
+}
+
+async function deleteProject(projectId, userId) {
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project)                throw new Error("PROJECT_NOT_FOUND");
+    if (project.userId !== userId) throw new Error("UNAUTHORIZED");
+    return prisma.project.delete({ where: { id: projectId } });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PREVIEW DELETE (no DB writes — warn the writer first)
+// ─────────────────────────────────────────────────────────────────────────────
+
 function previewDelete(project, field, amountToRemove) {
-    // field: "words" | "chapters" | "scenes"
     const fieldMap = {
-        words:    { current: "currentWordCount",  target: "targetWordCount" },
-        chapters: { current: "currentChapters",   target: "targetChapters" },
-        scenes:   { current: "currentScenes",     target: "targetScenes" }
+        words:    { current: "currentWordCount",  target: "targetWordCount"  },
+        chapters: { current: "currentChapters",   target: "targetChapters"   },
+        scenes:   { current: "currentScenes",     target: "targetScenes"     }
     };
 
     const map = fieldMap[field];
@@ -109,10 +159,8 @@ function previewDelete(project, field, amountToRemove) {
 
     const currentCount = project[map.current];
     const targetCount  = project[map.target];
-
-    // Floor at 0 — count can never go negative
-    const newCount = Math.max(currentCount - amountToRemove, 0);
-    const actualRemoved = currentCount - newCount; // might be less than requested if near 0
+    const newCount     = Math.max(currentCount - amountToRemove, 0);
+    const actualRemoved = currentCount - newCount;
 
     const currentDailyTarget = (targetCount && project.deadline && project.daysPerWeek)
         ? calculateDailyTarget(targetCount, currentCount, project.deadline, project.daysPerWeek)
@@ -129,70 +177,69 @@ function previewDelete(project, field, amountToRemove) {
         actualRemoved,
         currentDailyTarget,
         newDailyTarget,
-        // How much harder the daily target gets — useful for the warning message
         dailyTargetIncrease: (newDailyTarget && currentDailyTarget)
             ? newDailyTarget - currentDailyTarget
             : null
     };
 }
 
-// ─── LOG WORDS ────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// LOG WORDS
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function logWords(projectId, userId, wordsAdded) {
     const project = await prisma.project.findUnique({
         where: { id: projectId },
         select: { userId: true }
     });
-    if (!project) throw new Error("PROJECT_NOT_FOUND");
+    if (!project)                throw new Error("PROJECT_NOT_FOUND");
     if (project.userId !== userId) throw new Error("UNAUTHORIZED");
 
-    // wordsAdded is always positive here
-    await prisma.projectWordLog.create({
-        data: { projectId, userId, wordsAdded }
-    });
+    await prisma.projectWordLog.create({ data: { projectId, userId, wordsAdded } });
 
     return prisma.project.update({
         where: { id: projectId },
-        data: { currentWordCount: { increment: wordsAdded } }
+        data:  { currentWordCount: { increment: wordsAdded } }
     });
 }
 
-// ─── DELETE WORDS (confirmed) ─────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE WORDS (confirmed)
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function deleteWords(projectId, userId, wordsToRemove) {
     const project = await prisma.project.findUnique({
         where: { id: projectId },
         select: { userId: true, currentWordCount: true }
     });
-    if (!project) throw new Error("PROJECT_NOT_FOUND");
+    if (!project)                throw new Error("PROJECT_NOT_FOUND");
     if (project.userId !== userId) throw new Error("UNAUTHORIZED");
 
-    // Floor at 0
-    const newCount = Math.max(project.currentWordCount - wordsToRemove, 0);
+    const newCount      = Math.max(project.currentWordCount - wordsToRemove, 0);
     const actualRemoved = project.currentWordCount - newCount;
 
-    // Negative log entry — signed history
     await prisma.projectWordLog.create({
         data: { projectId, userId, wordsAdded: -actualRemoved }
     });
 
     return prisma.project.update({
         where: { id: projectId },
-        data: { currentWordCount: newCount }
+        data:  { currentWordCount: newCount }
     });
 }
 
-// ─── LOG CHAPTER / SCENE ──────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// LOG CHAPTER / SCENE
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function logChapterScene(projectId, userId, chaptersAdded, scenesAdded) {
     const project = await prisma.project.findUnique({
         where: { id: projectId },
         select: { userId: true }
     });
-    if (!project) throw new Error("PROJECT_NOT_FOUND");
+    if (!project)                throw new Error("PROJECT_NOT_FOUND");
     if (project.userId !== userId) throw new Error("UNAUTHORIZED");
 
-    // Positive log entry
     await prisma.projectProgressLog.create({
         data: {
             projectId, userId,
@@ -210,42 +257,38 @@ async function logChapterScene(projectId, userId, chaptersAdded, scenesAdded) {
     });
 }
 
-// ─── DELETE CHAPTER / SCENE (confirmed) ───────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE CHAPTER / SCENE (confirmed)
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function deleteChapterScene(projectId, userId, chaptersToRemove, scenesToRemove) {
     const project = await prisma.project.findUnique({
         where: { id: projectId },
         select: { userId: true, currentChapters: true, currentScenes: true }
     });
-    if (!project) throw new Error("PROJECT_NOT_FOUND");
+    if (!project)                throw new Error("PROJECT_NOT_FOUND");
     if (project.userId !== userId) throw new Error("UNAUTHORIZED");
 
-    // Floor at 0 for both
     const newChapters = Math.max(project.currentChapters - (chaptersToRemove || 0), 0);
     const newScenes   = Math.max(project.currentScenes   - (scenesToRemove   || 0), 0);
 
-    const actualChaptersRemoved = project.currentChapters - newChapters;
-    const actualScenesRemoved   = project.currentScenes   - newScenes;
-
-    // Negative log entry — signed history
     await prisma.projectProgressLog.create({
         data: {
             projectId, userId,
-            chaptersAdded: -actualChaptersRemoved,
-            scenesAdded:   -actualScenesRemoved
+            chaptersAdded: -(project.currentChapters - newChapters),
+            scenesAdded:   -(project.currentScenes   - newScenes)
         }
     });
 
     return prisma.project.update({
         where: { id: projectId },
-        data: {
-            currentChapters: newChapters,
-            currentScenes:   newScenes
-        }
+        data:  { currentChapters: newChapters, currentScenes: newScenes }
     });
 }
 
-// ─── LOG SESSION ──────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// LOG SESSION
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function logSession(projectId, userId) {
     const project = await prisma.project.findUnique({
@@ -258,7 +301,7 @@ async function logSession(projectId, userId) {
             lastSessionReset: true
         }
     });
-    if (!project) throw new Error("PROJECT_NOT_FOUND");
+    if (!project)                throw new Error("PROJECT_NOT_FOUND");
     if (project.userId !== userId) throw new Error("UNAUTHORIZED");
 
     const now = new Date();
@@ -276,9 +319,7 @@ async function logSession(projectId, userId) {
         }
     }
 
-    await prisma.projectSessionLog.create({
-        data: { projectId, userId }
-    });
+    await prisma.projectSessionLog.create({ data: { projectId, userId } });
 
     return prisma.project.update({
         where: { id: projectId },
@@ -289,7 +330,168 @@ async function logSession(projectId, userId) {
     });
 }
 
-// ─── FETCH TODAY'S TOTALS ─────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// LOG DAY  (streak system)
+// ─────────────────────────────────────────────────────────────────────────────
+// At least one of wordsLogged, chaptersLogged, scenesLogged, minutesLogged > 0.
+// Upserts today's ProjectDayLog, recalculates the streak on Project,
+// and — if the project is enrolled in an active DAYS_CHALLENGE and the streak
+// resets — disqualifies the entry and flips visibility to PRIVATE.
+
+async function logDay(projectId, userId, { wordsLogged = 0, chaptersLogged = 0, scenesLogged = 0, minutesLogged = 0 }) {
+    if (wordsLogged <= 0 && chaptersLogged <= 0 && scenesLogged <= 0 && minutesLogged <= 0) {
+        throw new Error("AT_LEAST_ONE_FIELD_REQUIRED");
+    }
+
+    const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: {
+            userId: true,
+            currentStreak: true,
+            lastLogDate: true,
+            consecutiveDaysTarget: true,
+            visibility: true,
+            eventEntries: {
+                where: { disqualified: false },
+                include: { event: { select: { id: true, type: true, isActive: true, endDate: true } } }
+            }
+        }
+    });
+
+    if (!project)                throw new Error("PROJECT_NOT_FOUND");
+    if (project.userId !== userId) throw new Error("UNAUTHORIZED");
+
+    const today       = toUTCDay(new Date());
+    const newStreak   = computeNewStreak(project.currentStreak, project.lastLogDate);
+    const alreadyToday = project.lastLogDate
+        ? Math.round((today - toUTCDay(project.lastLogDate)) / (1000 * 60 * 60 * 24)) === 0
+        : false;
+
+    // Upsert: create or add to today's day log.
+    await prisma.projectDayLog.upsert({
+        where:  { projectId_logDate: { projectId, logDate: today } },
+        create: {
+            projectId, userId, logDate: today,
+            wordsLogged, chaptersLogged, scenesLogged, minutesLogged,
+            streakAtLog: newStreak
+        },
+        update: {
+            wordsLogged:    { increment: wordsLogged    },
+            chaptersLogged: { increment: chaptersLogged },
+            scenesLogged:   { increment: scenesLogged   },
+            minutesLogged:  { increment: minutesLogged  },
+            streakAtLog:    newStreak
+        }
+    });
+
+    // Only update streak / lastLogDate on the project if today hasn't been logged yet.
+    const projectUpdate = alreadyToday
+        ? {}  // already logged today — totals updated above, streak unchanged
+        : { currentStreak: newStreak, lastLogDate: today };
+
+    await prisma.project.update({
+        where: { id: projectId },
+        data:  projectUpdate
+    });
+
+    // ── Event disqualification check ─────────────────────────────────────────
+    // If this is the FIRST log of the day (not alreadyToday), a missed-day reset
+    // (newStreak === 1 AND project.currentStreak > 1) means the writer broke
+    // their chain. Disqualify from any active DAYS_CHALLENGE entries.
+    const streakBroken = !alreadyToday && newStreak === 1 && project.currentStreak > 1;
+
+    if (streakBroken) {
+        const challengeEntries = project.eventEntries.filter(
+            e => e.event.type === "DAYS_CHALLENGE" && e.event.isActive && new Date(e.event.endDate) > new Date()
+        );
+
+        if (challengeEntries.length > 0) {
+            const now = new Date();
+            // Disqualify each active challenge entry
+            await prisma.projectEventEntry.updateMany({
+                where: {
+                    projectId,
+                    eventId: { in: challengeEntries.map(e => e.event.id) },
+                    disqualified: false
+                },
+                data: { disqualified: true, disqualifiedAt: now }
+            });
+            // Flip visibility to PRIVATE — removes from public event page
+            await prisma.project.update({
+                where: { id: projectId },
+                data:  { visibility: "PRIVATE" }
+            });
+        }
+    }
+
+    // Return the refreshed project with its day logs
+    return prisma.project.findUnique({
+        where: { id: projectId },
+        include: { dayLogs: { orderBy: { logDate: "desc" }, take: 30 } }
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STREAK BREAKER (called by a cron job — not by the user)
+// ─────────────────────────────────────────────────────────────────────────────
+// Finds all projects with a streak > 0 that haven't logged yesterday or today,
+// resets their streak to 0, and disqualifies them from any active challenges.
+
+async function runStreakBreaker() {
+    const yesterday = toUTCDay(new Date(Date.now() - 86400000));
+
+    // Find projects whose lastLogDate is before yesterday (they missed at least one day)
+    const stalledProjects = await prisma.project.findMany({
+        where: {
+            currentStreak: { gt: 0 },
+            OR: [
+                { lastLogDate: { lt: yesterday } },
+                { lastLogDate: null }
+            ]
+        },
+        select: {
+            id: true,
+            currentStreak: true,
+            eventEntries: {
+                where: { disqualified: false },
+                include: { event: { select: { id: true, type: true, isActive: true, endDate: true } } }
+            }
+        }
+    });
+
+    for (const project of stalledProjects) {
+        await prisma.project.update({
+            where: { id: project.id },
+            data:  { currentStreak: 0 }
+        });
+
+        const challengeEntries = project.eventEntries.filter(
+            e => e.event.type === "DAYS_CHALLENGE" && e.event.isActive && new Date(e.event.endDate) > new Date()
+        );
+
+        if (challengeEntries.length > 0) {
+            const now = new Date();
+            await prisma.projectEventEntry.updateMany({
+                where: {
+                    projectId: project.id,
+                    eventId: { in: challengeEntries.map(e => e.event.id) },
+                    disqualified: false
+                },
+                data: { disqualified: true, disqualifiedAt: now }
+            });
+            await prisma.project.update({
+                where: { id: project.id },
+                data:  { visibility: "PRIVATE" }
+            });
+        }
+    }
+
+    return { processed: stalledProjects.length };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FETCH TODAY'S TOTALS
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function fetchTodayTotals(projectId, userId) {
     const todayStart = startOfToday();
@@ -309,7 +511,6 @@ async function fetchTodayTotals(projectId, userId) {
         })
     ]);
 
-    // Sum signed values — net progress today (additions minus deletions)
     return {
         wordsToday:    wordLogs.reduce((sum, l) => sum + l.wordsAdded, 0),
         chaptersToday: progressLogs.reduce((sum, l) => sum + l.chaptersAdded, 0),
@@ -318,7 +519,9 @@ async function fetchTodayTotals(projectId, userId) {
     };
 }
 
-// ─── TRACKER SUMMARY ──────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// TRACKER SUMMARY
+// ─────────────────────────────────────────────────────────────────────────────
 
 function calculateTrackerSummary(project, todayTotals = {}) {
     const summary = {};
@@ -331,20 +534,18 @@ function calculateTrackerSummary(project, todayTotals = {}) {
     } = todayTotals;
 
     if (project.targetWordCount) {
-        const remaining    = Math.max(project.targetWordCount - project.currentWordCount, 0);
-        const dailyTarget  = (deadline && daysPerWeek)
+        const remaining   = Math.max(project.targetWordCount - project.currentWordCount, 0);
+        const dailyTarget = (deadline && daysPerWeek)
             ? calculateDailyTarget(project.targetWordCount, project.currentWordCount, deadline, daysPerWeek)
             : null;
         summary.wordCount = {
-            current: project.currentWordCount,
-            target: project.targetWordCount,
+            current:      project.currentWordCount,
+            target:       project.targetWordCount,
             remaining,
-            percent: Math.min(Math.round((project.currentWordCount / project.targetWordCount) * 100), 100),
+            percent:      Math.min(Math.round((project.currentWordCount / project.targetWordCount) * 100), 100),
             dailyTarget,
             todayCount:   wordsToday,
-            todayPercent: dailyTarget
-                ? Math.min(Math.round((wordsToday / dailyTarget) * 100), 100)
-                : null
+            todayPercent: dailyTarget ? Math.min(Math.round((wordsToday / dailyTarget) * 100), 100) : null
         };
     }
 
@@ -354,15 +555,13 @@ function calculateTrackerSummary(project, todayTotals = {}) {
             ? calculateDailyTarget(project.targetChapters, project.currentChapters, deadline, daysPerWeek)
             : null;
         summary.chapters = {
-            current: project.currentChapters,
-            target: project.targetChapters,
+            current:      project.currentChapters,
+            target:       project.targetChapters,
             remaining,
-            percent: Math.min(Math.round((project.currentChapters / project.targetChapters) * 100), 100),
+            percent:      Math.min(Math.round((project.currentChapters / project.targetChapters) * 100), 100),
             dailyTarget,
             todayCount:   chaptersToday,
-            todayPercent: dailyTarget
-                ? Math.min(Math.round((chaptersToday / dailyTarget) * 100), 100)
-                : null
+            todayPercent: dailyTarget ? Math.min(Math.round((chaptersToday / dailyTarget) * 100), 100) : null
         };
     }
 
@@ -372,57 +571,78 @@ function calculateTrackerSummary(project, todayTotals = {}) {
             ? calculateDailyTarget(project.targetScenes, project.currentScenes, deadline, daysPerWeek)
             : null;
         summary.scenes = {
-            current: project.currentScenes,
-            target: project.targetScenes,
+            current:      project.currentScenes,
+            target:       project.targetScenes,
             remaining,
-            percent: Math.min(Math.round((project.currentScenes / project.targetScenes) * 100), 100),
+            percent:      Math.min(Math.round((project.currentScenes / project.targetScenes) * 100), 100),
             dailyTarget,
             todayCount:   scenesToday,
-            todayPercent: dailyTarget
-                ? Math.min(Math.round((scenesToday / dailyTarget) * 100), 100)
-                : null
+            todayPercent: dailyTarget ? Math.min(Math.round((scenesToday / dailyTarget) * 100), 100) : null
         };
     }
 
     if (project.sessionGoalCount && project.sessionGoalType) {
         const remaining = Math.max(project.sessionGoalCount - project.currentSessionCount, 0);
         summary.sessions = {
-            current: project.currentSessionCount,
-            target: project.sessionGoalCount,
+            current:      project.currentSessionCount,
+            target:       project.sessionGoalCount,
             remaining,
-            period: project.sessionGoalType,
-            percent: Math.min(Math.round((project.currentSessionCount / project.sessionGoalCount) * 100), 100),
+            period:       project.sessionGoalType,
+            percent:      Math.min(Math.round((project.currentSessionCount / project.sessionGoalCount) * 100), 100),
             dailyTarget:  null,
             todayCount:   sessionsToday,
             todayPercent: null
         };
     }
 
+    // ── Streak summary ────────────────────────────────────────────────────────
+    if (project.consecutiveDaysTarget) {
+        summary.streak = {
+            current:    project.currentStreak,
+            target:     project.consecutiveDaysTarget,
+            percent:    Math.min(Math.round((project.currentStreak / project.consecutiveDaysTarget) * 100), 100),
+            lastLogDate: project.lastLogDate ?? null,
+            // Did the user already log today? Useful for UI to disable the "Log Day" button.
+            loggedToday: project.lastLogDate
+                ? Math.round((toUTCDay(new Date()) - toUTCDay(project.lastLogDate)) / (1000 * 60 * 60 * 24)) === 0
+                : false
+        };
+    }
+
     return summary;
 }
 
-// ─── FETCH FUNCTIONS ──────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// FETCH HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function fetchPublicProjects() {
     return prisma.project.findMany({
         where: { visibility: "PUBLIC", status: "IN_PROGRESS" },
         select: {
-            id:                  true,
-            title:               true,
-            genre:               true,
-            status:              true,
-            // progress numbers only — no notes, no tasks, no logs, no description
-            targetWordCount:     true,
-            currentWordCount:    true,
-            targetChapters:      true,
-            currentChapters:     true,
-            targetScenes:        true,
-            currentScenes:       true,
-            sessionGoalType:     true,
-            sessionGoalCount:    true,
-            currentSessionCount: true,
-            // author identity only
-            user: { select: { username: true, avatar: true } }
+            id:                   true,
+            title:                true,
+            genre:                true,
+            status:               true,
+            phase:                true,
+            targetWordCount:      true,
+            currentWordCount:     true,
+            targetChapters:       true,
+            currentChapters:      true,
+            targetScenes:         true,
+            currentScenes:        true,
+            sessionGoalType:      true,
+            sessionGoalCount:     true,
+            currentSessionCount:  true,
+            consecutiveDaysTarget: true,
+            currentStreak:        true,
+            lastLogDate:          true,
+            user: { select: { username: true, avatar: true } },
+            // Include active event entries so the frontend knows which challenge they're in
+            eventEntries: {
+                where: { disqualified: false },
+                include: { event: { select: { id: true, title: true, type: true, daysTarget: true, endDate: true } } }
+            }
         },
         orderBy: { updatedAt: "desc" }
     });
@@ -431,7 +651,7 @@ async function fetchPublicProjects() {
 async function updateDeadline(projectId, newDeadline, daysPerWeek) {
     return prisma.project.update({
         where: { id: projectId },
-        data: { deadline: new Date(newDeadline), daysPerWeek }
+        data:  { deadline: new Date(newDeadline), daysPerWeek }
     });
 }
 
@@ -439,9 +659,14 @@ async function fetchProjectById(projectId) {
     return prisma.project.findUnique({
         where: { id: projectId },
         include: {
-            wordLogs:     { orderBy: { loggedAt: "desc" }, take: 30 },
-            progressLogs: { orderBy: { loggedAt: "desc" }, take: 30 },
-            sessionLogs:  { orderBy: { loggedAt: "desc" }, take: 30 }
+            wordLogs:     { orderBy: { loggedAt: "desc"  }, take: 30 },
+            progressLogs: { orderBy: { loggedAt: "desc"  }, take: 30 },
+            sessionLogs:  { orderBy: { loggedAt: "desc"  }, take: 30 },
+            dayLogs:      { orderBy: { logDate:  "desc"  }, take: 30 },
+            eventEntries: {
+                where: { disqualified: false },
+                include: { event: true }
+            }
         }
     });
 }
@@ -477,7 +702,8 @@ async function fetchRecentProject(userId) {
             include: {
                 wordLogs:     { orderBy: { loggedAt: "desc" }, take: 1 },
                 progressLogs: { orderBy: { loggedAt: "desc" }, take: 1 },
-                sessionLogs:  { orderBy: { loggedAt: "desc" }, take: 1 }
+                sessionLogs:  { orderBy: { loggedAt: "desc" }, take: 1 },
+                dayLogs:      { orderBy: { logDate:  "desc" }, take: 1 }
             }
         });
     }
@@ -488,27 +714,45 @@ async function fetchRecentProject(userId) {
         include: {
             wordLogs:     { orderBy: { loggedAt: "desc" }, take: 1 },
             progressLogs: { orderBy: { loggedAt: "desc" }, take: 1 },
-            sessionLogs:  { orderBy: { loggedAt: "desc" }, take: 1 }
+            sessionLogs:  { orderBy: { loggedAt: "desc" }, take: 1 },
+            dayLogs:      { orderBy: { logDate:  "desc" }, take: 1 }
         }
     });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPORTS
+// ─────────────────────────────────────────────────────────────────────────────
+
 module.exports = {
+    // Project CRUD
     fetchProjects,
     createProject,
     updateProject,
     deleteProject,
+
+    // Progress logging
     logWords,
     deleteWords,
     logChapterScene,
     deleteChapterScene,
     logSession,
     previewDelete,
+
+    // Day / streak logging
+    logDay,
+    runStreakBreaker,
+    computeNewStreak,
+    didMissDay,
+
+    // Summary helpers
     calculateTrackerSummary,
     calculateDailyTarget,
     fetchTodayTotals,
+
+    // Fetch helpers
     fetchPublicProjects,
     updateDeadline,
     fetchProjectById,
-    fetchRecentProject
+    fetchRecentProject,
 };

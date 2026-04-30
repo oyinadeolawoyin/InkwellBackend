@@ -126,6 +126,25 @@ async function deleteSubmission(req, res) {
   }
 }
 
+async function getSpotlight(req, res) {
+  try {
+    const submissions = await feedbackService.getSpotlightSubmissions();
+    res.json(submissions);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+}
+
+async function getArchive(req, res) {
+  try {
+    const { page = 1 } = req.query;
+    const result = await feedbackService.getOutdatedSubmissions({ page: Number(page) });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+}
+
 // ─── FEEDBACK RESPONSES ──────────────────────────────────────────────────────
 
 async function createResponse(req, res) {
@@ -362,6 +381,8 @@ module.exports = {
   getUserSubmissions,
   closeSubmission,
   deleteSubmission,
+  getSpotlight,
+  getArchive,
   createResponse,
   updateResponse,
   toggleResponseUpvote,

@@ -15,19 +15,29 @@ router.post("/:projectId/updateProject",   authenticateJWT, projectController.up
 router.post("/:projectId/deleteProject",   authenticateJWT, projectController.deleteProject);
 router.post("/:projectId/updateDeadline",  authenticateJWT, projectController.updateDeadline);
 
-// ─── Word tracking ────────────────────────────────────────────
+// ─── Word tracking ─────────────────────────────────────────────
 router.post("/:projectId/logWords",        authenticateJWT, projectController.logWords);
 // Step 1 — preview: returns warning, writes nothing
 router.post("/:projectId/previewDelete",   authenticateJWT, projectController.previewDeleteProgress);
 // Step 2 — confirmed deletes
 router.post("/:projectId/deleteWords",     authenticateJWT, projectController.deleteWords);
 
-// ─── Chapter / Scene tracking ─────────────────────────────────
+// ─── Chapter / Scene tracking ──────────────────────────────────
 router.post("/:projectId/logChapterScene",    authenticateJWT, projectController.logChapterScene);
 // previewDelete covers chapters & scenes too (pass field: "chapters" or "scenes")
 router.post("/:projectId/deleteChapterScene", authenticateJWT, projectController.deleteChapterScene);
 
-// ─── Session tracking ─────────────────────────────────────────
+// ─── Session tracking ──────────────────────────────────────────
 router.post("/:projectId/logSession", authenticateJWT, projectController.logSession);
+
+// ─── Day / streak tracking ─────────────────────────────────────
+// Body: { wordsLogged?, chaptersLogged?, scenesLogged?, minutesLogged? }
+// At least one field must be a positive number to count the day.
+router.post("/:projectId/logDay", authenticateJWT, projectController.logDay);
+
+// ─── Event enrolment ───────────────────────────────────────────
+// Enrol this project in a DAYS_CHALLENGE event. Project must be PUBLIC.
+// Body: { eventId }
+router.post("/:projectId/enrollEvent", authenticateJWT, projectController.enrollInEvent);
 
 module.exports = router;

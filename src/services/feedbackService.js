@@ -242,6 +242,37 @@ async function deleteSubmission(submissionId, userId) {
   };
 }
 
+// 1. Fetch the Spotlight (Top 6 oldest that need critiques)
+async function getSpotlightSubmissions() {
+  return await prisma.feedbackSubmission.findMany({
+    where: {
+      isOutdated: false,
+      isOpen: true,
+      critiqueCount: { lt: 3 }
+    },
+    include: submissionMeta,
+    orderBy: { createdAt: 'asc' }, // Oldest first to move the queue
+    take: 6
+  });
+}
+
+// 2. Fetch Outdated (Archive)
+async function getOutdatedSubmissions({ page = 1, limit = 10 }) {
+  const skip = (page - 1) * limit;
+  return await prisma.feedbackSubmission.findMany({
+    where: {
+      OR: [
+        { isOutdated: true },
+        { critiqueCount: { gte: 3 } }
+      ]
+    },
+    include: submissionMeta,
+    orderBy: { createdAt: 'desc' },
+    skip,
+    take: limit
+  });
+}
+
 // ─── FEEDBACK RESPONSES ──────────────────────────────────────────────────────
 
 async function createResponse(criticId, submissionId, data) {
@@ -253,6 +284,7 @@ async function createResponse(criticId, submissionId, data) {
     generalFeedback,
   } = data;
 
+  // ── Validation ─────────────────────────────────────────────────────────────
   for (const [key, val] of Object.entries({
     overallRating, clarityRating, pacingRating, believabilityRating,
   })) {
@@ -266,18 +298,21 @@ async function createResponse(criticId, submissionId, data) {
   }
   validateGeneralFeedback(generalFeedback);
 
+  // Fetch submission to check status and tier
   const submission = await prisma.feedbackSubmission.findUnique({
     where:   { id: submissionId },
-    // Include email so the controller can pass the author directly to notifyUser
     include: { user: { select: { id: true, username: true, email: true } } },
   });
+
   if (!submission)                    throw new Error("Submission not found.");
   if (!submission.isOpen)             throw new Error("This submission is no longer accepting feedback.");
   if (submission.userId === criticId) throw new Error("You cannot critique your own work.");
 
-  const pointsEarned = pointsService.getTierCost(submission.wordCountTier);
+  // 1. CALCULATE POINTS (Full points for Spotlight, Half for Outdated)
+  const pointsAwarded = pointsService.calculateCritiquePoints(submission.wordCountTier, submission.isOutdated);
 
   const response = await prisma.$transaction(async (tx) => {
+    // 2. CREATE THE RESPONSE
     const resp = await tx.feedbackResponse.create({
       data: {
         submissionId,
@@ -287,7 +322,7 @@ async function createResponse(criticId, submissionId, data) {
         pacingRating,
         believabilityRating,
         generalFeedback: generalFeedback.trim(),
-        pointsEarned,
+        pointsEarned: pointsAwarded, // Log exactly what they earned
       },
       include: {
         critic: { select: userSelect },
@@ -295,12 +330,26 @@ async function createResponse(criticId, submissionId, data) {
       },
     });
 
-    await pointsService.awardCritiquePoints(criticId, submission.wordCountTier, tx);
+    // 3. AWARD THE CALCULATED POINTS
+    await pointsService.awardCritiquePoints(criticId, pointsAwarded, tx);
+
+    // 4. INCREMENT CRITIQUE COUNT
+    const updatedSub = await tx.feedbackSubmission.update({
+      where: { id: submissionId },
+      data: { critiqueCount: { increment: 1 } }
+    });
+
+    // 5. ROTATE OUT OF SPOTLIGHT (If hits 3 critiques, mark as outdated and close)
+    if (updatedSub.critiqueCount >= 3 && !updatedSub.isOutdated) {
+      await tx.feedbackSubmission.update({
+        where: { id: submissionId },
+        data: { isOutdated: true, isOpen: false }
+      });
+    }
+
     return resp;
   });
 
-  // Attach the submission author onto the response so the controller
-  // can call notifyUser without an extra DB lookup
   return { ...response, submissionAuthor: submission.user, submissionTitle: submission.title };
 }
 
@@ -552,6 +601,7 @@ async function deleteParagraphCommentReply(replyId, authorId) {
   return { deleted: true };
 }
 
+
 module.exports = {
   getUserById,
   getAllUsersExcept,
@@ -560,6 +610,8 @@ module.exports = {
   getSubmissionById,
   closeSubmission,
   deleteSubmission,
+  getSpotlightSubmissions,
+  getOutdatedSubmissions,
   createResponse,
   updateResponse,
   toggleResponseUpvote,

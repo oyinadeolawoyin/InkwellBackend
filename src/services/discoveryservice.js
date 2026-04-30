@@ -14,11 +14,13 @@ async function createStory({
   genre,
   synopsis,
   firstChapter,
+  firstChapterTitle,
   coverUrl,
   authorName,
   recommendedBy,
   platform,
   platformLink,
+  contentWarnings,
 }) {
   return prisma.discoveryStory.create({
     data: {
@@ -27,11 +29,13 @@ async function createStory({
       genre,
       synopsis,
       firstChapter,
+      firstChapterTitle: firstChapterTitle || null,
       coverUrl: coverUrl || null,
       authorName,
       recommendedBy: recommendedBy || null,
       platform,
       platformLink,
+      contentWarnings: contentWarnings || [],
     },
     include: {
       user: { select: AUTHOR_SELECT },
@@ -80,7 +84,7 @@ async function findStory(storyId) {
 
 async function updateStory(
   storyId,
-  { title, genre, synopsis, firstChapter, coverUrl, authorName, recommendedBy, platform, platformLink }
+  { title, genre, synopsis, firstChapter, firstChapterTitle, coverUrl, authorName, recommendedBy, platform, platformLink, contentWarnings }
 ) {
   return prisma.discoveryStory.update({
     where: { id: storyId },
@@ -89,11 +93,13 @@ async function updateStory(
       ...(genre !== undefined && { genre }),
       ...(synopsis !== undefined && { synopsis }),
       ...(firstChapter !== undefined && { firstChapter }),
+      ...(firstChapterTitle !== undefined && { firstChapterTitle }),
       ...(coverUrl !== undefined && { coverUrl }),
       ...(authorName !== undefined && { authorName }),
       ...(recommendedBy !== undefined && { recommendedBy }),
       ...(platform !== undefined && { platform }),
       ...(platformLink !== undefined && { platformLink }),
+      ...(contentWarnings !== undefined && { contentWarnings }),
     },
     include: {
       user: { select: AUTHOR_SELECT },

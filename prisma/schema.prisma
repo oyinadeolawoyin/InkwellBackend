@@ -27,6 +27,7 @@ model User {
   resetToken       String?   @unique
   resetTokenExpiry DateTime?
 
+  // ── existing relations ──────────────────────────────────────────────────
   groupSprints        GroupSprint[]
   sprints             Sprint[]
   notification        Notification[]
@@ -50,6 +51,7 @@ model User {
   wallPostReplies     WallPostReply[]
   soundscapes         Soundscape[]
 
+  // ── feedback hub relations ──────────────────────────────────────────────
   feedbackPoints              FeedbackPoint?
   feedbackSubmissions         FeedbackSubmission[]
   feedbackResponses           FeedbackResponse[]
@@ -60,8 +62,54 @@ model User {
 
   discoveryStories            DiscoveryStory[]
   discoveryLikes              DiscoveryLike[]
+}
 
-  subscriptions               Subscription[]
+// ─────────────────────────────────────────────────────────────────────────────
+// PLATFORM EVENTS  (carousel notices + days challenges)
+// ─────────────────────────────────────────────────────────────────────────────
+
+
+model PlatformEvent {
+  id          Int          @id @default(autoincrement())
+  title       String
+  description String
+  bannerUrl   String?                     // optional hero image for the carousel card
+  type        EventType
+  // For DAYS_CHALLENGE: how many consecutive days writers must maintain
+  daysTarget  Int?
+  startDate   DateTime
+  endDate     DateTime
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  // Projects currently enrolled in this event (public + streak still alive)
+  entries     ProjectEventEntry[]
+
+  @@index([isActive])
+  @@index([type])
+  @@index([startDate, endDate])
+}
+
+// Join table: a public project opts into a DAYS_CHALLENGE event.
+// Row is soft-deleted (disqualified = true) when the streak resets,
+// which also triggers the project visibility flip to PRIVATE in the service.
+model ProjectEventEntry {
+  id              Int           @id @default(autoincrement())
+  projectId       Int
+  eventId         Int
+  enrolledAt      DateTime      @default(now())
+  disqualified    Boolean       @default(false)
+  disqualifiedAt  DateTime?
+
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  event           PlatformEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  // one entry per project per event
+  @@unique([projectId, eventId])
+  @@index([eventId])
+  @@index([projectId])
+  @@index([disqualified])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -75,31 +123,39 @@ model Project {
   description      String?
   link             String?
   genre            String?
-  visibility       Visibility @default(PRIVATE)
+  visibility       Visibility    @default(PRIVATE)
 
-  // ── Tracker ──────────────────────────────────────────────────────────────
-  trackerType         TrackerType   @default(WORD_COUNT)
-  targetWordCount     Int?
-  currentWordCount    Int           @default(0)
-  targetChapters      Int?
-  currentChapters     Int           @default(0)
-  targetScenes        Int?
-  currentScenes       Int           @default(0)
+  // ── Writing phase ──────────────────────────────────────────────────────
+  phase            WritingPhase  @default(DRAFTING)
+
+  // ── Word / chapter / scene targets ────────────────────────────────────
+  targetWordCount  Int?
+  currentWordCount Int        @default(0)
+  targetChapters   Int?
+  currentChapters  Int        @default(0)
+  targetScenes     Int?
+  currentScenes    Int        @default(0)
+
+  // ── Session goal ───────────────────────────────────────────────────────
   sessionGoalType     SessionGoalType?
   sessionGoalCount    Int?
-  currentSessionCount Int           @default(0)
+  currentSessionCount Int    @default(0)
   lastSessionReset    DateTime?
 
-  // Streak tracker (used when trackerType = STREAK)
-  streakGoal          Int?          // e.g. 5, 7, 10 consecutive days
-  currentStreak       Int           @default(0)
-  longestStreak       Int           @default(0)
-  lastLoggedDate      DateTime?     // UTC midnight of last log day
-  streakBrokenAt      DateTime?
+  // ── Consecutive-days streak tracker ───────────────────────────────────
+  // How many days in a row the writer wants to write (set by the user).
 
-  // ── Writing phase ─────────────────────────────────────────────────────────
-  phase               WritingPhase  @default(DRAFTING)
+  consecutiveDaysTarget Int?
 
+  // Current streak count. Resets to 0 if a day is missed.
+
+  currentStreak         Int       @default(0)
+  
+  // UTC calendar date of the last day log (date only, stored as DateTime).
+  // Used to detect whether today has been logged and whether a day was skipped.
+  lastLogDate           DateTime?
+
+  // ── Deadline / schedule ────────────────────────────────────────────────
   deadline         DateTime?
   daysPerWeek      Int           @default(5)
   status           ProjectStatus @default(IN_PROGRESS)
@@ -110,14 +166,45 @@ model Project {
   wordLogs         ProjectWordLog[]
   progressLogs     ProjectProgressLog[]
   sessionLogs      ProjectSessionLog[]
-  dailyLogs        ProjectDailyLog[]
-  eventParticipations EventParticipation[]
+  // One log entry per calendar day for the streak system
+  dayLogs          ProjectDayLog[]
   todolists        Todolist[]
   notes            Note[]
   sprints          Sprint[]
+  // Events this project is enrolled in
+  eventEntries     ProjectEventEntry[]
 
   @@index([userId])
   @@index([visibility])
+}
+
+// ─── Day Log (streak system) ──────────────────────────────────────────────────
+// One row per calendar day per project. The writer must log at least one of:
+//   wordsLogged, chaptersLogged, scenesLogged, minutesLogged
+// to "count" the day towards their consecutive streak.
+model ProjectDayLog {
+  id             Int      @id @default(autoincrement())
+  projectId      Int
+  userId         Int
+  // Calendar date this log counts for (stored as midnight UTC, e.g. 2025-04-27T00:00:00Z)
+  logDate        DateTime
+  // At least one of the four fields below must be > 0
+  wordsLogged    Int      @default(0)
+  chaptersLogged Int      @default(0)
+  scenesLogged   Int      @default(0)
+  minutesLogged  Int      @default(0)
+  // Snapshot of the streak value after this log was saved
+  streakAtLog    Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Only one day-log per calendar day per project
+  @@unique([projectId, logDate])
+  @@index([projectId])
+  @@index([userId])
+  @@index([logDate])
 }
 
 model ProjectWordLog {
@@ -157,67 +244,6 @@ model ProjectSessionLog {
 
   @@index([projectId])
   @@index([loggedAt])
-}
-
-// One unified daily log — one row per project per calendar day
-model ProjectDailyLog {
-  id            Int      @id @default(autoincrement())
-  projectId     Int
-  userId        Int
-  logDate       DateTime // UTC midnight of the log day
-  wordsAdded    Int      @default(0)
-  chaptersAdded Int      @default(0)
-  scenesAdded   Int      @default(0)
-  sessionsAdded Int      @default(0)
-  dayLogged     Boolean  @default(true) // always true — for streak type projects
-  streakAtLog   Int      @default(0)
-
-  project  Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@unique([projectId, logDate])
-  @@index([projectId])
-  @@index([logDate])
-  @@index([userId])
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WRITING EVENTS
-// ─────────────────────────────────────────────────────────────────────────────
-
-model WritingEvent {
-  id           Int      @id @default(autoincrement())
-  title        String
-  description  String?
-  durationDays Int      // 5, 7, or 10
-  startDate    DateTime
-  endDate      DateTime
-  isActive     Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  participations EventParticipation[]
-
-  @@index([isActive])
-  @@index([startDate])
-}
-
-model EventParticipation {
-  id            Int      @id @default(autoincrement())
-  eventId       Int
-  projectId     Int
-  userId        Int
-  currentStreak Int      @default(0)
-  completed     Boolean  @default(false)
-  joinedAt      DateTime @default(now())
-  completedAt   DateTime?
-
-  event   WritingEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@unique([eventId, projectId])
-  @@index([eventId])
-  @@index([projectId])
-  @@index([userId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -318,147 +344,65 @@ model Soundscape {
   isApproved    Boolean   @default(false)
   createdAt     DateTime  @default(now())
 
-  user     User     @relation(fields: [contributedBy], references: [id], onDelete: Cascade)
-  sprints  Sprint[]
+  contributor   User      @relation(fields: [contributedBy], references: [id], onDelete: Cascade)
+  sprints       Sprint[]
 
   @@index([contributedBy])
   @@index([isApproved])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NOTIFICATIONS & SUBSCRIPTIONS
+// WEEKLY SCHEDULE
 // ─────────────────────────────────────────────────────────────────────────────
 
-model Notification {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  username  String
-  message   String
-  link      String
-  read      Boolean  @default(false)
-  createdAt DateTime @default(now())
-
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-}
-
-model Subscription {
-  id           Int      @id @default(autoincrement())
-  userId       Int
-  subscription Json
-  createdAt    DateTime @default(now())
-
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// QUOTES
-// ─────────────────────────────────────────────────────────────────────────────
-
-model Quote {
-  id        Int         @id @default(autoincrement())
-  text      String
-  author    String?
-  category  String?
-  createdAt DateTime    @default(now())
-
-  likes     QuoteLike[]
-
-  @@index([createdAt])
-}
-
-model QuoteLike {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  quoteId   Int
-  createdAt DateTime @default(now())
-
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  quote     Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, quoteId])
-  @@index([quoteId])
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// BLOG
-// ─────────────────────────────────────────────────────────────────────────────
-
-model BlogPost {
-  id          Int            @id @default(autoincrement())
+model WeeklySchedule {
+  id          Int      @id @default(autoincrement())
+  weekStart   DateTime @unique
   title       String
-  content     String
-  coverUrl    String?
-  authorName  String
-  published   Boolean        @default(false)
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  likes       BlogPostLike[]
-  comments    BlogComment[]
+  sessions ScheduledSession[]
 
-  @@index([published])
-  @@index([createdAt])
+  @@index([weekStart])
+  @@index([isActive])
 }
 
-model BlogPostLike {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  postId    Int
-  createdAt DateTime @default(now())
+model ScheduledSession {
+  id          Int      @id @default(autoincrement())
+  scheduleId  Int
+  dayOfWeek   Int
+  time        String
+  label       String?
+  isDone      Boolean   @default(false)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  post      BlogPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  schedule WeeklySchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, postId])
-  @@index([postId])
-}
-
-model BlogComment {
-  id        Int            @id @default(autoincrement())
-  userId    Int
-  postId    Int
-  content   String
-  createdAt DateTime       @default(now())
-
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  post      BlogPost       @relation(fields: [postId], references: [id], onDelete: Cascade)
-  replies   BlogReply[]
-
-  @@index([postId])
-}
-
-model BlogReply {
-  id        Int         @id @default(autoincrement())
-  userId    Int
-  commentId Int
-  content   String
-  createdAt DateTime    @default(now())
-
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  comment   BlogComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
-
-  @@index([commentId])
+  @@index([scheduleId])
+  @@index([dayOfWeek])
+  @@index([isDone])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WRITING SNIPPETS
+// WRITING SNIPPET
 // ─────────────────────────────────────────────────────────────────────────────
 
 model WritingSnippet {
-  id          Int            @id @default(autoincrement())
-  userId      Int
-  content     String
-  source      SnippetSource
-  sprintId    Int?
-  createdAt   DateTime       @default(now())
+  id         Int           @id @default(autoincrement())
+  userId     Int
+  context    String?
+  mediaUrl   String?
+  sourceType SnippetSource @default(POST_SPRINT)
+  tags       String?
+  createdAt  DateTime      @default(now())
 
-  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  likes       SnippetLike[]
-  comments    SnippetComment[]
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  likes      SnippetLike[]
+  comments   SnippetComment[]
 
   @@index([userId])
   @@index([createdAt])
@@ -468,8 +412,6 @@ model SnippetLike {
   id        Int            @id @default(autoincrement())
   userId    Int
   snippetId Int
-  createdAt DateTime       @default(now())
-
   user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   snippet   WritingSnippet @relation(fields: [snippetId], references: [id], onDelete: Cascade)
 
@@ -478,31 +420,19 @@ model SnippetLike {
 }
 
 model SnippetComment {
-  id        Int                  @id @default(autoincrement())
+  id        Int            @id @default(autoincrement())
   userId    Int
   snippetId Int
   content   String
-  createdAt DateTime             @default(now())
+  createdAt DateTime       @default(now())
 
-  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  snippet   WritingSnippet       @relation(fields: [snippetId], references: [id], onDelete: Cascade)
   likes     SnippetCommentLike[]
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  snippet   WritingSnippet @relation(fields: [snippetId], references: [id], onDelete: Cascade)
   replies   SnippetReply[]
 
   @@index([snippetId])
-}
-
-model SnippetCommentLike {
-  id        Int            @id @default(autoincrement())
-  userId    Int
-  commentId Int
-  createdAt DateTime       @default(now())
-
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  comment   SnippetComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, commentId])
-  @@index([commentId])
+  @@index([userId])
 }
 
 model SnippetReply {
@@ -512,70 +442,181 @@ model SnippetReply {
   content   String
   createdAt DateTime       @default(now())
 
+  likes     SnippetReplyLike[]
   user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   comment   SnippetComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   @@index([commentId])
+  @@index([userId])
+}
+
+model SnippetCommentLike {
+  id        Int            @id @default(autoincrement())
+  userId    Int
+  commentId Int
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment   SnippetComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, commentId])
+  @@index([commentId])
 }
 
 model SnippetReplyLike {
-  id        Int          @id @default(autoincrement())
-  userId    Int
-  replyId   Int
-  createdAt DateTime     @default(now())
-
-  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reply     SnippetReply @relation(fields: [replyId], references: [id], onDelete: Cascade)
+  id      Int          @id @default(autoincrement())
+  userId  Int
+  replyId Int
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reply   SnippetReply @relation(fields: [replyId], references: [id], onDelete: Cascade)
 
   @@unique([userId, replyId])
   @@index([replyId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WALL POSTS
+// QUOTES, SUBSCRIPTIONS, NOTIFICATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Quote {
+  id        Int         @id @default(autoincrement())
+  title     String?
+  content   String
+  createdAt DateTime    @default(now())
+  likes     QuoteLike[]
+}
+
+model QuoteLike {
+  id      Int   @id @default(autoincrement())
+  userId  Int
+  quoteId Int
+  user    User  @relation(fields: [userId], references: [id])
+  quote   Quote @relation(fields: [quoteId], references: [id])
+
+  @@unique([userId, quoteId])
+}
+
+model Subscription {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  subscription Json
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  username  String
+  userId    Int
+  message   String?
+  link      String?
+  read      Boolean? @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, read])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLOG
+// ─────────────────────────────────────────────────────────────────────────────
+
+model BlogPost {
+  id        Int            @id @default(autoincrement())
+  title     String?
+  content   String
+  mediaUrl  String?
+  link      String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  likes     BlogPostLike[]
+  comments  BlogComment[]
+
+  @@index([createdAt])
+}
+
+model BlogPostLike {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  blogPostId Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post       BlogPost @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, blogPostId])
+  @@index([blogPostId])
+}
+
+model BlogComment {
+  id         Int         @id @default(autoincrement())
+  blogPostId Int
+  authorId   Int
+  content    String
+  createdAt  DateTime    @default(now())
+  post       BlogPost    @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+  author     User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replies    BlogReply[]
+
+  @@index([blogPostId])
+  @@index([authorId])
+}
+
+model BlogReply {
+  id        Int         @id @default(autoincrement())
+  commentId Int
+  authorId  Int
+  content   String
+  createdAt DateTime    @default(now())
+  comment   BlogComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  author    User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([commentId])
+  @@index([authorId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WALL POST
 // ─────────────────────────────────────────────────────────────────────────────
 
 model WallPost {
-  id          Int              @id @default(autoincrement())
-  authorId    Int
-  profileId   Int
-  content     String
-  createdAt   DateTime         @default(now())
+  id        Int      @id @default(autoincrement())
+  authorId  Int
+  profileId Int
+  content   String
+  createdAt DateTime @default(now())
 
-  author      User             @relation("WallPostAuthor",  fields: [authorId],  references: [id], onDelete: Cascade)
-  profile     User             @relation("WallPostProfile", fields: [profileId], references: [id], onDelete: Cascade)
-  likes       WallPostLike[]
-  comments    WallPostComment[]
+  author   User              @relation("WallPostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  profile  User              @relation("WallPostProfile", fields: [profileId], references: [id], onDelete: Cascade)
+  likes    WallPostLike[]
+  comments WallPostComment[]
 
   @@index([profileId])
   @@index([authorId])
 }
 
 model WallPostLike {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  postId    Int
-  createdAt DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  wallPostId Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallPost   WallPost @relation(fields: [wallPostId], references: [id], onDelete: Cascade)
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  post      WallPost @relation(fields: [postId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, postId])
-  @@index([postId])
+  @@unique([userId, wallPostId])
+  @@index([wallPostId])
 }
 
 model WallPostComment {
-  id        Int               @id @default(autoincrement())
-  userId    Int
-  postId    Int
-  content   String
-  createdAt DateTime          @default(now())
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  wallPostId Int
+  content    String
+  createdAt  DateTime @default(now())
 
-  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  post      WallPost          @relation(fields: [postId], references: [id], onDelete: Cascade)
-  replies   WallPostReply[]
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallPost WallPost        @relation(fields: [wallPostId], references: [id], onDelete: Cascade)
+  replies  WallPostReply[]
 
-  @@index([postId])
+  @@index([wallPostId])
+  @@index([userId])
 }
 
 model WallPostReply {
@@ -585,8 +626,8 @@ model WallPostReply {
   content   String
   createdAt DateTime        @default(now())
 
-  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  comment   WallPostComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment WallPostComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   @@index([commentId])
   @@index([userId])
@@ -596,18 +637,25 @@ model WallPostReply {
 // FEEDBACK HUB
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Tracks how many unique users have ever posted a submission.
+// Used to grant the first 5 posters a free pass (no points required).
 model FeedbackHubBootstrap {
-  id          Int @id @default(autoincrement())
-  posterCount Int @default(0)
+  id        Int      @id @default(autoincrement())
+  // total distinct users who have ever submitted — only increments, never decrements
+  posterCount Int    @default(0)
 
+  // Singleton row — always id = 1
   @@map("feedback_hub_bootstrap")
 }
+
+// ─── Point wallet ────────────────────────────────────────────────────────────
 
 model FeedbackPoint {
   id             Int      @id @default(autoincrement())
   userId         Int      @unique
-  postingBalance Int      @default(5)
-  reputation     Int      @default(5)
+  postingBalance Int      @default(5)   // spendable — goes up and down
+  reputation     Int      @default(5)   // lifetime total — only ever goes up
+  // tracks whether this user has already used their bootstrap free post
   usedFreePost   Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -615,19 +663,23 @@ model FeedbackPoint {
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+// ─── Submission (chapter posted for feedback) ─────────────────────────────────
+
 model FeedbackSubmission {
   id               Int             @id @default(autoincrement())
   userId           Int
   title            String
   genre            String
-  summary          String
-  content          String
+  summary          String          // 25–60 words enforced in service
+  content          String          // full chapter text
+  critiqueCount    Int      @default(0) // Tracks the number of critiques
+  isOutdated       Boolean  @default(false) // Marks if the post is no longer in Spotlight
   wordCountTier    WordCountTier
-  actualWordCount  Int
+  actualWordCount  Int             // counted server-side on submit
   draftStage       DraftStage
   contentWarnings  String[]
-  feedbackWanted   String[]
-  pointsCost       Int
+  feedbackWanted   String[]        // free-text tags from writer
+  pointsCost       Int             // 0 if bootstrap free post, else 10/20/30/40
   wasFreePost      Boolean         @default(false)
   isOpen           Boolean         @default(true)
   createdAt        DateTime        @default(now())
@@ -643,15 +695,17 @@ model FeedbackSubmission {
   @@index([genre])
 }
 
+// ─── Full critique (ratings + general feedback) ───────────────────────────────
+
 model FeedbackResponse {
   id                  Int                @id @default(autoincrement())
   submissionId        Int
   criticId            Int
-  overallRating       Int
-  clarityRating       Int
-  pacingRating        Int
-  believabilityRating Int
-  generalFeedback     String
+  overallRating       Int                // 1–5
+  clarityRating       Int                // 1–5
+  pacingRating        Int                // 1–5
+  believabilityRating Int                // 1–5
+  generalFeedback     String             // ≥100 words enforced in service
   pointsEarned        Int
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
@@ -660,11 +714,13 @@ model FeedbackResponse {
   critic      User                   @relation(fields: [criticId], references: [id], onDelete: Cascade)
   upvotes     FeedbackResponseUpvote[]
 
+  // One full response per critic per submission
   @@unique([submissionId, criticId])
   @@index([submissionId])
   @@index([criticId])
 }
 
+// Upvote on a full critique — submission author only, gives critic +3 pts
 model FeedbackResponseUpvote {
   id         Int              @id @default(autoincrement())
   userId     Int
@@ -678,11 +734,13 @@ model FeedbackResponseUpvote {
   @@index([responseId])
 }
 
+// ─── Paragraph comment ────────────────────────────────────────────────────────
+
 model ParagraphComment {
   id             Int                @id @default(autoincrement())
   submissionId   Int
   authorId       Int
-  paragraphIndex Int
+  paragraphIndex Int                // 0-based paragraph position
   content        String
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
@@ -697,6 +755,7 @@ model ParagraphComment {
   @@index([authorId])
 }
 
+// Upvote on a paragraph comment — any user except comment author, gives author +3 pts
 model ParagraphCommentUpvote {
   id        Int              @id @default(autoincrement())
   userId    Int
@@ -710,6 +769,7 @@ model ParagraphCommentUpvote {
   @@index([commentId])
 }
 
+// One-level reply on a paragraph comment (no nested threading)
 model ParagraphCommentReply {
   id        Int              @id @default(autoincrement())
   commentId Int
@@ -724,23 +784,21 @@ model ParagraphCommentReply {
   @@index([authorId])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DISCOVERY
-// ─────────────────────────────────────────────────────────────────────────────
-
 model DiscoveryStory {
   id              Int      @id @default(autoincrement())
-  userId          Int
+  userId          Int                         // the person who submitted
   title           String
   genre           String
   synopsis        String
-  firstChapter    String
-  coverUrl        String?
-  authorName      String
-  recommendedBy   String?
-  platform        String
-  platformLink    String
-  isApproved      Boolean  @default(false)
+  firstChapterTitle String?                   // title of the opening chapter
+  firstChapter    String                      // full chapter text
+  coverUrl        String?                     // uploaded cover image
+  authorName      String                      // real author name (may differ from submitter)
+  recommendedBy   String?                     // if submitted by someone other than the author
+  platform        String                      // e.g. "Wattpad", "Kindle", "Royal Road"
+  platformLink    String                      // URL to the story on that platform
+  contentWarnings String[] @default([])       // e.g. ["Violence", "Strong language"]
+  isApproved      Boolean  @default(false)    // admin approval gate
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -780,6 +838,7 @@ enum Role {
 enum SnippetSource {
   POST_SPRINT
   STANDALONE
+  DAYS_CHALLENGE 
 }
 
 enum SessionGoalType {
@@ -806,29 +865,29 @@ enum ProjectStatus {
 }
 
 enum DraftStage {
-  ROUGH
-  POLISHING
-  FINAL_EDIT
+  ROUGH      // be gentle
+  POLISHING  // be honest
+  FINAL_EDIT // be ruthless
 }
 
 enum WordCountTier {
-  TIER_1000
-  TIER_2000
-  TIER_3000
-  TIER_4000
-}
-
-enum TrackerType {
-  WORD_COUNT
-  CHAPTERS
-  SCENES
-  SESSIONS
-  STREAK
+  TIER_1000  // ≤1,000 words — costs/earns 10 pts
+  TIER_2000  // ≤2,000 words — costs/earns 20 pts
+  TIER_3000  // ≤3,000 words — costs/earns 30 pts
+  TIER_4000  // ≤4,000 words — costs/earns 40 pts
 }
 
 enum WritingPhase {
   BRAINSTORMING
-  PLANNING
+  OUTLINING
   DRAFTING
   EDITING
+}
+
+// Platform event categories
+enum EventType {
+  ANNOUNCEMENT    // General news / carousel card only — no streak tracking
+  DAYS_CHALLENGE  // e.g. "Write 5 days straight" — uses daysTarget + streak system
+  WORKSHOP        // Scheduled workshop or live event
+  OTHER
 }

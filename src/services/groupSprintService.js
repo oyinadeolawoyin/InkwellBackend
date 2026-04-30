@@ -1,5 +1,53 @@
 const prisma = require("../config/prismaClient");
 
+// ─── AUTO-END STALE SPRINTS ───────────────────────────────────
+// Called before any read that returns active sprints.
+// Ends any GroupSprint whose (startedAt + duration + 10 min grace) has passed.
+// This ensures stale sprints vanish from the homepage even when the host
+// never manually ends the session.
+async function autoEndStaleSprints() {
+  const now = new Date();
+
+  // Find all active group sprints that are overdue
+  const stale = await prisma.groupSprint.findMany({
+    where: { isActive: true },
+    select: { id: true, startedAt: true, duration: true },
+  });
+
+  const overdueIds = stale
+    .filter(({ startedAt, duration }) => {
+      const endsAt = new Date(startedAt).getTime() + (duration + 10) * 60 * 1000;
+      return now.getTime() > endsAt;
+    })
+    .map((gs) => gs.id);
+
+  if (overdueIds.length === 0) return;
+
+  // For each overdue sprint, run the same logic as endGroupSprint
+  for (const groupSprintId of overdueIds) {
+    try {
+      await prisma.sprint.updateMany({
+        where: { groupSprintId, isActive: true },
+        data: { completedAt: now, isActive: false },
+      });
+
+      const allSprints = await prisma.sprint.findMany({
+        where: { groupSprintId },
+        select: { wordsWritten: true },
+      });
+      const totalWordsWritten = allSprints.reduce((sum, s) => sum + (s.wordsWritten || 0), 0);
+
+      await prisma.groupSprint.update({
+        where: { id: groupSprintId },
+        data: { completedAt: now, isActive: false, totalWordsWritten },
+      });
+    } catch (err) {
+      // Don't let one failure block the rest
+      console.error(`[autoEnd] Failed to end groupSprint ${groupSprintId}:`, err);
+    }
+  }
+}
+
 // ─── GROUP SPRINT ─────────────────────────────────────────────
 async function startGroupSprint(userId, duration, visibility = "PUBLIC", sprintType = "WRITING") {
   const groupSprint = await prisma.groupSprint.create({
@@ -32,6 +80,9 @@ async function endGroupSprint(groupSprintId) {
 }
 
 async function fetchGroupSprint(groupSprintId) {
+  // Auto-end this sprint if its time has passed (covers direct URL visits)
+  await autoEndStaleSprints();
+
   return prisma.groupSprint.findFirst({
     where: { id: groupSprintId },
     include: {
@@ -51,6 +102,9 @@ async function fetchGroupSprint(groupSprintId) {
 }
 
 async function fetchAllActiveGroupSprints({ take, skip }) {
+  // Sweep stale sprints before returning the list so the homepage stays clean
+  await autoEndStaleSprints();
+
   const [groupSprints, total] = await prisma.$transaction([
     prisma.groupSprint.findMany({
       where: { isActive: true, visibility: "PUBLIC" }, // only PUBLIC sprints in the global list
@@ -202,5 +256,6 @@ module.exports = {
   fetchLastGroupSprint,
   joinSprint,
   checkoutSprint,
-  fetchLoginUserSprint
+  fetchLoginUserSprint,
+  autoEndStaleSprints,
 };

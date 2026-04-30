@@ -1,6 +1,8 @@
 require("dotenv").config();
 const projectService = require("../services/projectService");
 
+// ─── FETCH PROJECTS ───────────────────────────────────────────
+
 async function fetchProjects(req, res) {
     const userId = req.user.id;
     try {
@@ -12,11 +14,14 @@ async function fetchProjects(req, res) {
     }
 }
 
+// ─── CREATE PROJECT ───────────────────────────────────────────
+
 async function createProject(req, res) {
     const {
         title, description, link, genre, visibility,
         targetWordCount, deadline, daysPerWeek,
-        targetChapters, targetScenes, sessionGoalType, sessionGoalCount
+        targetChapters, targetScenes, sessionGoalType, sessionGoalCount,
+        phase, consecutiveDaysTarget
     } = req.body;
     const userId = req.user.id;
 
@@ -24,11 +29,21 @@ async function createProject(req, res) {
         return res.status(400).json({ message: "Deadline must be a future date." });
     }
 
+    const validPhases = ["BRAINSTORMING", "OUTLINING", "DRAFTING", "EDITING"];
+    if (phase && !validPhases.includes(phase)) {
+        return res.status(400).json({ message: `phase must be one of: ${validPhases.join(", ")}` });
+    }
+
+    // if (consecutiveDaysTarget !== undefined && Number(consecutiveDaysTarget) <= 0) {
+    //     return res.status(400).json({ message: "consecutiveDaysTarget must be a positive number." });
+    // }
+
     try {
         const project = await projectService.createProject(
             Number(userId), title, description, link, genre, visibility,
             targetWordCount, deadline, daysPerWeek,
-            targetChapters, targetScenes, sessionGoalType, sessionGoalCount
+            targetChapters, targetScenes, sessionGoalType, sessionGoalCount,
+            phase, consecutiveDaysTarget
         );
         res.status(201).json({ project });
     } catch (error) {
@@ -37,11 +52,15 @@ async function createProject(req, res) {
     }
 }
 
+// ─── UPDATE PROJECT ───────────────────────────────────────────
+
 async function updateProject(req, res) {
     const {
         title, description, link, genre, visibility,
         targetWordCount, deadline, daysPerWeek, status,
-        targetChapters, targetScenes, sessionGoalType, sessionGoalCount
+        targetChapters, targetScenes, sessionGoalType, sessionGoalCount,
+        // new fields
+        phase, consecutiveDaysTarget
     } = req.body;
     const projectId = req.params.projectId;
     const userId    = req.user.id;
@@ -50,11 +69,21 @@ async function updateProject(req, res) {
         return res.status(400).json({ message: "Deadline must be a future date." });
     }
 
+    const validPhases = ["BRAINSTORMING", "OUTLINING", "DRAFTING", "EDITING"];
+    if (phase && !validPhases.includes(phase)) {
+        return res.status(400).json({ message: `phase must be one of: ${validPhases.join(", ")}` });
+    }
+
+    // if (consecutiveDaysTarget !== undefined && Number(consecutiveDaysTarget) <= 0) {
+    //     return res.status(400).json({ message: "consecutiveDaysTarget must be a positive number." });
+    // }
+
     try {
         const project = await projectService.updateProject(
             Number(projectId), userId, title, description, link, genre, visibility,
             targetWordCount, deadline, daysPerWeek, status,
-            targetChapters, targetScenes, sessionGoalType, sessionGoalCount
+            targetChapters, targetScenes, sessionGoalType, sessionGoalCount,
+            phase, consecutiveDaysTarget
         );
         res.status(200).json({ project });
     } catch (error) {
@@ -64,6 +93,8 @@ async function updateProject(req, res) {
         res.status(500).json({ message: "Something went wrong. Please try again later." });
     }
 }
+
+// ─── DELETE PROJECT ───────────────────────────────────────────
 
 async function deleteProject(req, res) {
     const projectId = req.params.projectId;
@@ -103,14 +134,10 @@ async function logWords(req, res) {
 }
 
 // ─── PREVIEW DELETE ───────────────────────────────────────────
-// Step 1: call this first — returns warning data, writes nothing to DB.
-// Frontend shows: "Deleting X words will raise your daily target from Y → Z. Confirm?"
 
 async function previewDeleteProgress(req, res) {
     const projectId = Number(req.params.projectId);
     const userId    = req.user.id;
-    // field: "words" | "chapters" | "scenes"
-    // amount: how many to remove
     const { field, amount } = req.body;
 
     if (!field || !amount || Number(amount) <= 0) {
@@ -137,7 +164,6 @@ async function previewDeleteProgress(req, res) {
 }
 
 // ─── DELETE WORDS (confirmed) ─────────────────────────────────
-// Step 2: writer saw the warning and confirmed. Now actually subtract.
 
 async function deleteWords(req, res) {
     const projectId   = req.params.projectId;
@@ -228,6 +254,69 @@ async function logSession(req, res) {
     }
 }
 
+// ─── LOG DAY (streak) ─────────────────────────────────────────
+// Body: { wordsLogged?, chaptersLogged?, scenesLogged?, minutesLogged? }
+// At least one must be a positive number.
+
+async function logDay(req, res) {
+    const projectId = Number(req.params.projectId);
+    const userId    = req.user.id;
+    const { wordsLogged = 0, chaptersLogged = 0, scenesLogged = 0, minutesLogged = 0 } = req.body;
+
+    const allZero = [wordsLogged, chaptersLogged, scenesLogged, minutesLogged]
+        .every(v => !v || Number(v) <= 0);
+
+    if (allZero) {
+        return res.status(400).json({
+            message: "Provide at least one of: wordsLogged, chaptersLogged, scenesLogged, minutesLogged."
+        });
+    }
+
+    try {
+        const project = await projectService.logDay(projectId, userId, {
+            wordsLogged:    Number(wordsLogged)    || 0,
+            chaptersLogged: Number(chaptersLogged) || 0,
+            scenesLogged:   Number(scenesLogged)   || 0,
+            minutesLogged:  Number(minutesLogged)  || 0,
+        });
+        res.status(200).json({ project });
+    } catch (error) {
+        if (error.message === "PROJECT_NOT_FOUND")        return res.status(404).json({ message: "Project not found." });
+        if (error.message === "UNAUTHORIZED")             return res.status(403).json({ message: "You do not have permission to update this project." });
+        if (error.message === "AT_LEAST_ONE_FIELD_REQUIRED") return res.status(400).json({ message: "Provide at least one positive value." });
+        console.error("Log day error:", error);
+        res.status(500).json({ message: "Something went wrong. Please try again later." });
+    }
+}
+
+// ─── ENROL PROJECT IN A DAYS CHALLENGE ───────────────────────
+// Body: { eventId }
+// Project must be PUBLIC before enrolling.
+
+async function enrollInEvent(req, res) {
+    const projectId = Number(req.params.projectId);
+    const userId    = req.user.id;
+    const { eventId } = req.body;
+
+    if (!eventId) {
+        return res.status(400).json({ message: "eventId is required." });
+    }
+
+    try {
+        const entry = await projectService.enrollInEvent(projectId, userId, Number(eventId));
+        res.status(200).json({ entry });
+    } catch (error) {
+        if (error.message === "PROJECT_NOT_FOUND")    return res.status(404).json({ message: "Project not found." });
+        if (error.message === "UNAUTHORIZED")          return res.status(403).json({ message: "You do not have permission." });
+        if (error.message === "EVENT_NOT_FOUND")       return res.status(404).json({ message: "Event not found." });
+        if (error.message === "NOT_A_DAYS_CHALLENGE")  return res.status(400).json({ message: "You can only enrol in a Days Challenge event." });
+        if (error.message === "EVENT_NOT_ACTIVE")      return res.status(400).json({ message: "This event is no longer active." });
+        if (error.message === "PROJECT_MUST_BE_PUBLIC") return res.status(400).json({ message: "Your project must be set to Public before joining a challenge." });
+        console.error("Enrol in event error:", error);
+        res.status(500).json({ message: "Something went wrong. Please try again later." });
+    }
+}
+
 // ─── PUBLIC PROJECTS ──────────────────────────────────────────
 
 async function fetchPublicProjects(req, res) {
@@ -309,6 +398,8 @@ module.exports = {
     logChapterScene,
     deleteChapterScene,
     logSession,
+    logDay,
+    enrollInEvent,
     fetchPublicProjects,
     updateDeadline,
     getDailyTarget,

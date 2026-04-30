@@ -1,12 +1,12 @@
 const groupSprintService = require("../services/groupSprintService");
 const { notifyUser } = require('../services/notificationService');
 const { AccessToken, TrackSource } = require("livekit-server-sdk");
-const {
-  notifyGroupSprintStarted,
-  notifyGroupSprintEnded,
-  notifyMemberCheckedIn,
-  notifyMemberCheckedOut,
-} = require('../services/discordService');
+// const {
+//   notifyGroupSprintStarted,
+//   notifyGroupSprintEnded,
+//   notifyMemberCheckedIn,
+//   notifyMemberCheckedOut,
+// } = require('../services/discordService');
 
 // ─── GROUP SPRINT ─────────────────────────────────────────────
 async function startGroupSprint(req, res) {
@@ -30,11 +30,11 @@ async function startGroupSprint(req, res) {
       userId, Number(duration), resolvedVisibility, resolvedSprintType
     );
 
-    notifyGroupSprintStarted({
-      username,
-      duration,
-      groupSprintId: groupSprint.id,
-    }).catch((err) => console.error("Discord sprint-started notify failed:", err));
+    // notifyGroupSprintStarted({
+    //   username,
+    //   duration,
+    //   groupSprintId: groupSprint.id,
+    // }).catch((err) => console.error("Discord sprint-started notify failed:", err));
 
     res.status(201).json({ groupSprint });
   } catch (error) {
@@ -51,15 +51,15 @@ async function endGroupSprint(req, res) {
 
     const user    = req.user;
     const message = "You did great for arranging the sprint and helping others write. You should be proud of yourself 🌱";
-    const link    = `https://inkwellinky.vercel.app/group-sprint/${groupSprintId}`;
+    const link    = `/group-sprint/${groupSprintId}`;
     await notifyUser(user, message, link);
 
-    if (!groupSprint.isActive) {
-      notifyGroupSprintEnded({
-        groupSprintId,
-        totalWordsWritten: groupSprint.totalWordsWritten,
-      }).catch((err) => console.error("Discord sprint-ended notify failed:", err));
-    }
+    // if (!groupSprint.isActive) {
+    //   notifyGroupSprintEnded({
+    //     groupSprintId,
+    //     totalWordsWritten: groupSprint.totalWordsWritten,
+    //   }).catch((err) => console.error("Discord sprint-ended notify failed:", err));
+    // }
 
     res.status(200).json({ groupSprint });
   } catch (error) {
@@ -132,11 +132,11 @@ async function joinSprint(req, res) {
       projectId     ? Number(projectId)     : null,   // ← new
     );
 
-    notifyMemberCheckedIn({
-      username:   req.user.username,
-      startWords: startWords != null ? Number(startWords) : 0,
-      groupSprintId: Number(groupSprintId),
-    }).catch((err) => console.error("Discord member-checked-in notify failed:", err));
+    // notifyMemberCheckedIn({
+    //   username:   req.user.username,
+    //   startWords: startWords != null ? Number(startWords) : 0,
+    //   groupSprintId: Number(groupSprintId),
+    // }).catch((err) => console.error("Discord member-checked-in notify failed:", err));
 
     res.status(201).json({ sprint });
   } catch (error) {
@@ -185,14 +185,14 @@ async function checkoutSprint(req, res) {
 
     const user    = req.user;
     const message = "Great job showing up and writing today. Every word counts 🌱";
-    const link    = `https://inkwellinky.vercel.app/snippet`;
+    const link    = `/snippets`;
     await notifyUser(user, message, link);
 
-    notifyMemberCheckedOut({
-      username:     req.user.username,
-      wordsWritten: sprint.wordsWritten,
-      groupSprintId: sprint.groupSprintId,
-    }).catch((err) => console.error("Discord member-checked-out notify failed:", err));
+    // notifyMemberCheckedOut({
+    //   username:     req.user.username,
+    //   wordsWritten: sprint.wordsWritten,
+    //   groupSprintId: sprint.groupSprintId,
+    // }).catch((err) => console.error("Discord member-checked-out notify failed:", err));
 
     if (sprint.groupSprint && !sprint.groupSprint.isActive) {
       notifyGroupSprintEnded({

@@ -27,7 +27,7 @@ app.use(express.urlencoded({ extended: true }));
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
-  "https://inkwell-inky-three.vercel.app",
+  "https://inkwell.com.ng",
   "https://inkwellinky.vercel.app",
 ];
 

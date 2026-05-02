@@ -21,6 +21,7 @@ model User {
   createdVia       String    @default("site")
   avatar           String?
   bio              String?
+  dateOfBirth      DateTime?
   role             Role      @default(USER)
   createdAt        DateTime  @default(now())
   timezone         String    @default("UTC")

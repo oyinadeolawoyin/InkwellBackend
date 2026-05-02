@@ -54,13 +54,14 @@ async function updateUser({
   username,
   email,
   bio,
-  avartar,
+  avatar,
+  dateOfBirth,
 }) {
   const existingUser = await prisma.user.findUnique({
     where: { id: userId },
     select: { username: true, email: true },
   });
-console.log("exist", existingUser);
+
   if (!existingUser) {
     throw new Error("User not found");
   }
@@ -75,8 +76,9 @@ console.log("exist", existingUser);
     data.email = email;
   }
 
-  if (bio !== undefined) data.bio = bio;
-  if (avartar !== undefined) data.avatar = avartar;
+  if (bio          !== undefined) data.bio         = bio;
+  if (avatar       !== undefined) data.avatar      = avatar;
+  if (dateOfBirth  !== undefined) data.dateOfBirth = dateOfBirth ? new Date(dateOfBirth) : null;
 
   return prisma.user.update({
     where: { id: userId },

@@ -9,6 +9,7 @@ const TIER_MAX_WORDS = {
   TIER_2000: 2000,
   TIER_3000: 3000,
   TIER_4000: 4000,
+  TIER_5000: 5000,
 };
 
 const GENERAL_FEEDBACK_MIN_WORDS = 100;
@@ -240,6 +241,69 @@ async function deleteSubmission(submissionId, userId) {
     refunded:       responseCount === 0 && !sub.wasFreePost,
     pointsRefunded: responseCount === 0 && !sub.wasFreePost ? sub.pointsCost : 0,
   };
+}
+
+// ─── UPDATE SUBMISSION ────────────────────────────────────────────────────────
+
+/**
+ * Update the editable fields of a submission.
+ * wordCountTier and cost are intentionally excluded — they cannot change after posting.
+ * Content word-count is still validated against the existing tier.
+ */
+async function updateSubmission(submissionId, userId, data) {
+  const {
+    title,
+    genre,
+    summary,
+    content,
+    draftStage,
+    contentWarnings,
+    feedbackWanted,
+  } = data;
+
+  const sub = await prisma.feedbackSubmission.findUnique({ where: { id: submissionId } });
+  if (!sub)              throw new Error("Submission not found.");
+  if (sub.userId !== userId) throw new Error("Not authorised.");
+
+  // Validate title / genre / content presence
+  if (title   !== undefined && !title.trim())   throw new Error("Title is required.");
+  if (genre   !== undefined && !genre.trim())   throw new Error("Genre is required.");
+  if (content !== undefined && !content.trim()) throw new Error("Chapter content cannot be empty.");
+
+  // Summary word count (25–60) if provided
+  if (summary !== undefined) {
+    const summaryWords = countWords(summary);
+    if (summaryWords < 25 || summaryWords > 60) {
+      throw new Error(`Summary must be 25–60 words (yours is ${summaryWords}).`);
+    }
+  }
+
+  // feedbackWanted must not be emptied
+  if (feedbackWanted !== undefined) {
+    if (!Array.isArray(feedbackWanted) || feedbackWanted.length === 0) {
+      throw new Error("Please add at least one specific feedback request.");
+    }
+  }
+
+  // Content word count must still fit the original tier
+  if (content !== undefined) {
+    validateChapterWordCount(content, sub.wordCountTier);
+  }
+
+  return prisma.feedbackSubmission.update({
+    where: { id: submissionId },
+    data: {
+      ...(title           !== undefined && { title:           title.trim() }),
+      ...(genre           !== undefined && { genre:           genre.trim() }),
+      ...(summary         !== undefined && { summary:         summary.trim() }),
+      ...(content         !== undefined && { content:         content.trim(),
+                                             actualWordCount: countWords(content) }),
+      ...(draftStage      !== undefined && { draftStage }),
+      ...(contentWarnings !== undefined && { contentWarnings }),
+      ...(feedbackWanted  !== undefined && { feedbackWanted }),
+    },
+    include: submissionMeta,
+  });
 }
 
 // 1. Fetch the Spotlight (Top 6 oldest that need critiques)
@@ -610,6 +674,7 @@ module.exports = {
   getSubmissionById,
   closeSubmission,
   deleteSubmission,
+  updateSubmission,
   getSpotlightSubmissions,
   getOutdatedSubmissions,
   createResponse,

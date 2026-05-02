@@ -114,6 +114,19 @@ async function closeSubmission(req, res) {
   }
 }
 
+async function updateSubmission(req, res) {
+  try {
+    const submission = await feedbackService.updateSubmission(
+      Number(req.params.id),
+      req.user.id,
+      req.body
+    );
+    res.json(submission);
+  } catch (err) {
+    res.status(errStatus(err.message)).json({ message: err.message });
+  }
+}
+
 async function deleteSubmission(req, res) {
   try {
     const result = await feedbackService.deleteSubmission(
@@ -380,6 +393,7 @@ module.exports = {
   getSubmissionById,
   getUserSubmissions,
   closeSubmission,
+  updateSubmission,
   deleteSubmission,
   getSpotlight,
   getArchive,

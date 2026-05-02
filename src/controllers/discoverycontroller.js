@@ -87,9 +87,10 @@ async function getStories(req, res) {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 12;
   const genre = req.query.genre || undefined;
+  const userId = req.query.userId ? Number(req.query.userId) : undefined;
 
   try {
-    const result = await discoveryService.getStories({ page, limit, genre });
+    const result = await discoveryService.getStories({ page, limit, genre, userId });
 
     if (req.user) {
       const storyIds = result.stories.map((s) => s.id);

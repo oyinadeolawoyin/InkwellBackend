@@ -13,6 +13,7 @@ const TIER_COSTS = {
   TIER_2000: 20,   // 2000 words → 4 × 500 = 20 pts
   TIER_3000: 30,   // 3000 words → 6 × 500 = 30 pts
   TIER_4000: 40,   // 4000 words → 8 × 500 = 40 pts
+  TIER_5000: 50,   // 5000 words → 10 × 500 = 40 pts
 };
 
 // Full-critique upvote: flat +3 pts per upvote (posting balance + reputation)

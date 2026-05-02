@@ -44,9 +44,14 @@ async function createStory({
   });
 }
 
-async function getStories({ page = 1, limit = 12, genre } = {}) {
+async function getStories({ page = 1, limit = 12, genre, userId } = {}) {
   const skip = (page - 1) * limit;
-  const where = { isApproved: true, ...(genre ? { genre } : {}) };
+  const where = {
+    isApproved: true,
+    ...(genre ? { genre } : {}),
+    // Filter by userId when provided (for profile page)
+    ...(userId ? { userId: Number(userId) } : {}),
+  };
 
   const [stories, total] = await Promise.all([
     prisma.discoveryStory.findMany({
@@ -78,7 +83,7 @@ async function getStory(storyId) {
 async function findStory(storyId) {
   return prisma.discoveryStory.findUnique({
     where: { id: storyId },
-    select: { id: true, userId: true, coverUrl: true, isApproved: true },
+    select: { id: true, userId: true, coverUrl: true, isApproved: true, title: true, authorName: true },
   });
 }
 

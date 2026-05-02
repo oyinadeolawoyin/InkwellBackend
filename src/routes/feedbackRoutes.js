@@ -21,6 +21,7 @@ router.get("/submissions",                ctrl.getSubmissions);
 router.get("/submissions/:id",           ctrl.getSubmissionById);
 router.post("/submissions",             authenticateJWT, ctrl.createSubmission);
 router.patch("/submissions/:id/close",  authenticateJWT, ctrl.closeSubmission);
+router.patch("/submissions/:id",        authenticateJWT, ctrl.updateSubmission);
 router.delete("/submissions/:id",       authenticateJWT, ctrl.deleteSubmission);
 
 // ─── FEEDBACK RESPONSES (full critiques) ─────────────────────────────────────

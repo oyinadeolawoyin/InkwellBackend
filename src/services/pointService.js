@@ -3,7 +3,7 @@ const prisma = require("../config/prismaClient");
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
-const BOOTSTRAP_FREE_SLOTS = 3;   // first 3 unique users to post get a free pass (was 5)
+const BOOTSTRAP_FREE_SLOTS = 4;   // first 3 unique users to post get a free pass (was 5)
 const NEW_MEMBER_SEED      = 2;   // posting pts every new member starts with
 
 // Points earned per critique = 5 pts per 500 words

@@ -29,7 +29,7 @@ async function createProject(req, res) {
         return res.status(400).json({ message: "Deadline must be a future date." });
     }
 
-    const validPhases = ["BRAINSTORMING", "OUTLINING", "DRAFTING", "EDITING"];
+    const validPhases = ["BRAINSTORMING", "OUTLINING", "DRAFTING", "EDITING", "PLANNING"];
     if (phase && !validPhases.includes(phase)) {
         return res.status(400).json({ message: `phase must be one of: ${validPhases.join(", ")}` });
     }
@@ -37,14 +37,17 @@ async function createProject(req, res) {
     // if (consecutiveDaysTarget !== undefined && Number(consecutiveDaysTarget) <= 0) {
     //     return res.status(400).json({ message: "consecutiveDaysTarget must be a positive number." });
     // }
-
+    console.log("t", title, "d",description, "l",link, "g",genre, "v",visibility,
+        "wc",targetWordCount, "de",deadline, "dwe",daysPerWeek,
+        "tc",targetChapters, "ts",targetScenes, "sg",sessionGoalType, "sco",sessionGoalCount,
+        "p",phase, "cota",consecutiveDaysTarget)
     try {
         const project = await projectService.createProject(
             Number(userId), title, description, link, genre, visibility,
             targetWordCount, deadline, daysPerWeek,
             targetChapters, targetScenes, sessionGoalType, sessionGoalCount,
             phase, consecutiveDaysTarget
-        );
+        ); console.log("pro", project);
         res.status(201).json({ project });
     } catch (error) {
         console.error("Create project error:", error);
@@ -69,7 +72,7 @@ async function updateProject(req, res) {
         return res.status(400).json({ message: "Deadline must be a future date." });
     }
 
-    const validPhases = ["BRAINSTORMING", "OUTLINING", "DRAFTING", "EDITING"];
+    const validPhases = ["BRAINSTORMING", "OUTLINING", "DRAFTING", "EDITING", "PLANNING"];
     if (phase && !validPhases.includes(phase)) {
         return res.status(400).json({ message: `phase must be one of: ${validPhases.join(", ")}` });
     }
@@ -89,6 +92,7 @@ async function updateProject(req, res) {
     } catch (error) {
         if (error.message === "PROJECT_NOT_FOUND") return res.status(404).json({ message: "Project not found." });
         if (error.message === "UNAUTHORIZED")       return res.status(403).json({ message: "You do not have permission to update this project." });
+        if (error.message === "VISIBILITY_LOCKED_BY_EVENT") return res.status(400).json({ message: "This project is enrolled in a Days Challenge and must remain Public." });
         console.error("Update project error:", error);
         res.status(500).json({ message: "Something went wrong. Please try again later." });
     }
@@ -242,9 +246,18 @@ async function deleteChapterScene(req, res) {
 async function logSession(req, res) {
     const projectId = req.params.projectId;
     const userId    = req.user.id;
+    const { wordsWritten = 0, chaptersWritten = 0, scenesWritten = 0, minutesWritten = 0 } = req.body;
 
     try {
-        const project = await projectService.logSession(Number(projectId), userId);
+        const project = await projectService.logSession(
+            Number(projectId), userId,
+            {
+                wordsWritten:    Number(wordsWritten)    || 0,
+                chaptersWritten: Number(chaptersWritten) || 0,
+                scenesWritten:   Number(scenesWritten)   || 0,
+                minutesWritten:  Number(minutesWritten)  || 0,
+            }
+        );
         res.status(200).json({ project });
     } catch (error) {
         if (error.message === "PROJECT_NOT_FOUND") return res.status(404).json({ message: "Project not found." });
@@ -312,6 +325,10 @@ async function enrollInEvent(req, res) {
         if (error.message === "NOT_A_DAYS_CHALLENGE")  return res.status(400).json({ message: "You can only enrol in a Days Challenge event." });
         if (error.message === "EVENT_NOT_ACTIVE")      return res.status(400).json({ message: "This event is no longer active." });
         if (error.message === "PROJECT_MUST_BE_PUBLIC") return res.status(400).json({ message: "Your project must be set to Public before joining a challenge." });
+        if (error.message === "PROJECT_CREATED_AFTER_EVENT_START") return res.status(400).json({ message: "Only projects that existed on the day the challenge started can join." });
+        if (error.message === "PROJECT_HAS_EXISTING_STREAK")       return res.status(400).json({ message: "Your project already has an active streak. Only projects with a clean streak (0 days) can join." });
+        if (error.message === "DAYS_TARGET_MISMATCH")              return res.status(400).json({ message: "Your project's consecutive days target doesn't match this challenge. Please update your project to match the challenge length, then try again." });
+        if (error.message === "USER_ALREADY_ENROLLED")             return res.status(400).json({ message: "You already have a project enrolled in this challenge. Only one project per member is allowed." });
         console.error("Enrol in event error:", error);
         res.status(500).json({ message: "Something went wrong. Please try again later." });
     }

@@ -1,12 +1,13 @@
 const express    = require("express");
 const router     = express.Router();
-const eventController = require("../controllers/eventController");
+const eventController = require("../controllers/eventcontroller");
 const { authenticateJWT } = require("../config/jwt");
+const upload = require("../config/multer");
 
 // ─── isAdmin middleware ────────────────────────────────────────
-// Reuse inline here — move to a shared middleware file if you prefer.
 function isAdmin(req, res, next) {
     if (!req.user || req.user.role !== "ADMIN") {
+        console.log("you're not an admin")
         return res.status(403).json({ message: "Admin access only." });
     }
     next();
@@ -30,8 +31,11 @@ router.get("/:eventId/projects", eventController.fetchEventPublicProjects);
 // GET /api/events/:eventId/communityStreak
 router.get("/:eventId/communityStreak", eventController.getEventCommunityStreak);
 
+// Winners shoutout for a completed DAYS_CHALLENGE — used by the community page
+// GET /api/events/:eventId/winners
+router.get("/:eventId/winners", eventController.fetchEventWinners);
+
 // ─── ADMIN ROUTES ─────────────────────────────────────────────
-// All admin routes require authentication + ADMIN role.
 
 // Full event list for the admin dashboard
 // GET /api/events/admin/all
@@ -48,5 +52,9 @@ router.post("/admin/:eventId/update", authenticateJWT, isAdmin, eventController.
 // Delete an event
 // POST /api/events/admin/:eventId/delete
 router.post("/admin/:eventId/delete", authenticateJWT, isAdmin, eventController.deleteEvent);
+
+// Manually trigger winner recording for a DAYS_CHALLENGE
+// POST /api/events/admin/:eventId/recordWinners
+router.post("/admin/:eventId/recordWinners", authenticateJWT, isAdmin, eventController.recordEventWinners);
 
 module.exports = router;

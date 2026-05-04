@@ -92,9 +92,25 @@ async function getEventCommunityStreak(req, res) {
   }
 }
 
+// GET /api/events/:eventId/winners
+// Public — returns the recorded winners for a completed challenge.
+async function fetchEventWinners(req, res) {
+  const eventId = Number(req.params.eventId);
+  try {
+    const data = await eventService.fetchEventWinners(eventId);
+    res.status(200).json(data);
+  } catch (error) {
+    if (error.message === "EVENT_NOT_FOUND")
+      return res.status(404).json({ message: "Event not found." });
+    if (error.message === "NOT_A_DAYS_CHALLENGE")
+      return res.status(400).json({ message: "Winners are only recorded for Days Challenge events." });
+    console.error("Fetch event winners error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ADMIN ENDPOINTS
-// Role check is done inside each function (same pattern as discoverycontroller).
 // ─────────────────────────────────────────────────────────────────────────────
 
 // GET /api/events/admin/all
@@ -146,9 +162,6 @@ async function createEvent(req, res) {
       endDate,
     });
 
-    // If the event starts right now (or in the past), notify everyone immediately.
-    // For future-dated events, use a cron job to call notifyAllUsersAboutEvent
-    // when startDate and endDate are reached.
     if (new Date(startDate) <= new Date()) {
       notifyAllUsersAboutEvent(event, "start"); // fire-and-forget
     }
@@ -199,8 +212,14 @@ async function updateEvent(req, res) {
       isActive,
     });
 
-    // Admin manually deactivated the event -> notify everyone it has ended.
+    // Admin manually deactivated the event -> record winners then notify everyone it ended.
     if (existing.isActive === true && isActive === false) {
+      // Record winners fire-and-forget — only meaningful for DAYS_CHALLENGE events.
+      if (existing.type === "DAYS_CHALLENGE") {
+        eventService.recordEventWinners(eventId).catch(err =>
+          console.error("recordEventWinners error:", err)
+        );
+      }
       notifyAllUsersAboutEvent(event, "end"); // fire-and-forget
     }
 
@@ -235,7 +254,6 @@ async function deleteEvent(req, res) {
 
     await eventService.deleteEvent(eventId);
 
-    // Notify all users the event was cancelled.
     notifyAllUsersAboutEvent(
       { ...existing, title: `${existing.title} (Cancelled)` },
       "end"
@@ -250,15 +268,39 @@ async function deleteEvent(req, res) {
   }
 }
 
+// POST /api/events/admin/:eventId/recordWinners
+// Manually trigger winner recording for a completed challenge.
+// Useful if the auto-trigger on deactivation is missed, or to re-run after corrections.
+async function recordEventWinners(req, res) {
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Not authorized." });
+  }
+
+  const eventId = Number(req.params.eventId);
+  try {
+    const result = await eventService.recordEventWinners(eventId);
+    res.status(200).json({ message: `Winners recorded.`, count: result.count });
+  } catch (error) {
+    if (error.message === "EVENT_NOT_FOUND")
+      return res.status(404).json({ message: "Event not found." });
+    if (error.message === "NOT_A_DAYS_CHALLENGE")
+      return res.status(400).json({ message: "Winners can only be recorded for Days Challenge events." });
+    console.error("Record winners error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
 module.exports = {
   // Public
   fetchActiveEvents,
   fetchEventById,
   fetchEventPublicProjects,
   getEventCommunityStreak,
+  fetchEventWinners,
   // Admin
   fetchAllEvents,
   createEvent,
   updateEvent,
   deleteEvent,
+  recordEventWinners,
 };

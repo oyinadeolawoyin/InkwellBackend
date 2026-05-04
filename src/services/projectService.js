@@ -115,14 +115,24 @@ async function updateProject(
     targetChapters, targetScenes, sessionGoalType, sessionGoalCount,
     phase, consecutiveDaysTarget
 ) {
-    const existing = await prisma.project.findUnique({ where: { id: projectId } });
+    const existing = await prisma.project.findUnique({
+        where: { id: projectId },
+        include: { eventEntries: { where: { disqualified: false }, select: { id: true } } }
+    });
     if (!existing)               throw new Error("PROJECT_NOT_FOUND");
     if (existing.userId !== userId) throw new Error("UNAUTHORIZED");
+
+    // Projects enrolled in an active challenge are locked to PUBLIC
+    const hasActiveEntry = existing.eventEntries.length > 0;
+    if (hasActiveEntry && visibility && visibility !== "PUBLIC") {
+        throw new Error("VISIBILITY_LOCKED_BY_EVENT");
+    }
+    const effectiveVisibility = hasActiveEntry ? "PUBLIC" : visibility;
 
     return prisma.project.update({
         where: { id: projectId },
         data: {
-            title, description, link, genre, visibility, status,
+            title, description, link, genre, visibility: effectiveVisibility, status,
             phase:                phase ?? existing.phase,
             targetWordCount:      targetWordCount      ? Number(targetWordCount)      : null,
             deadline:             deadline             ? new Date(deadline)           : null,
@@ -131,7 +141,9 @@ async function updateProject(
             targetScenes:         targetScenes         ? Number(targetScenes)         : null,
             sessionGoalType:      sessionGoalType      ?? null,
             sessionGoalCount:     sessionGoalCount     ? Number(sessionGoalCount)     : null,
-            consecutiveDaysTarget: consecutiveDaysTarget ? Number(consecutiveDaysTarget) : existing.consecutiveDaysTarget,
+            consecutiveDaysTarget: consecutiveDaysTarget !== undefined
+                ? (consecutiveDaysTarget ? Number(consecutiveDaysTarget) : null)
+                : existing.consecutiveDaysTarget,
         }
     });
 }
@@ -290,7 +302,7 @@ async function deleteChapterScene(projectId, userId, chaptersToRemove, scenesToR
 // LOG SESSION
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function logSession(projectId, userId) {
+async function logSession(projectId, userId, { wordsWritten = 0, chaptersWritten = 0, scenesWritten = 0, minutesWritten = 0 } = {}) {
     const project = await prisma.project.findUnique({
         where: { id: projectId },
         select: {
@@ -319,7 +331,16 @@ async function logSession(projectId, userId) {
         }
     }
 
-    await prisma.projectSessionLog.create({ data: { projectId, userId } });
+    await prisma.projectSessionLog.create({
+        data: {
+            projectId,
+            userId,
+            wordsWritten:    wordsWritten    || null,
+            chaptersWritten: chaptersWritten || null,
+            scenesWritten:   scenesWritten   || null,
+            minutesWritten:  minutesWritten  || null,
+        }
+    });
 
     return prisma.project.update({
         where: { id: projectId },
@@ -397,7 +418,7 @@ async function logDay(projectId, userId, { wordsLogged = 0, chaptersLogged = 0, 
     // ── Event disqualification check ─────────────────────────────────────────
     // If this is the FIRST log of the day (not alreadyToday), a missed-day reset
     // (newStreak === 1 AND project.currentStreak > 1) means the writer broke
-    // their chain. Disqualify from any active DAYS_CHALLENGE entries.
+    // their chain. Disqualify from any active DAYS_CHALLENGE entries and go PRIVATE.
     const streakBroken = !alreadyToday && newStreak === 1 && project.currentStreak > 1;
 
     if (streakBroken) {
@@ -437,6 +458,11 @@ async function logDay(projectId, userId, { wordsLogged = 0, chaptersLogged = 0, 
 // Finds all projects with a streak > 0 that haven't logged yesterday or today,
 // resets their streak to 0, and disqualifies them from any active challenges.
 
+// Alias used by the cron job
+async function breakExpiredStreaks() {
+    return runStreakBreaker();
+}
+
 async function runStreakBreaker() {
     const yesterday = toUTCDay(new Date(Date.now() - 86400000));
 
@@ -452,6 +478,7 @@ async function runStreakBreaker() {
         select: {
             id: true,
             currentStreak: true,
+            visibility: true,
             eventEntries: {
                 where: { disqualified: false },
                 include: { event: { select: { id: true, type: true, isActive: true, endDate: true } } }
@@ -459,7 +486,9 @@ async function runStreakBreaker() {
         }
     });
 
+    const now = new Date();
     for (const project of stalledProjects) {
+        // Always reset streak to 0
         await prisma.project.update({
             where: { id: project.id },
             data:  { currentStreak: 0 }
@@ -470,7 +499,7 @@ async function runStreakBreaker() {
         );
 
         if (challengeEntries.length > 0) {
-            const now = new Date();
+            // Disqualify from active challenges and flip to PRIVATE
             await prisma.projectEventEntry.updateMany({
                 where: {
                     projectId: project.id,
@@ -672,7 +701,7 @@ async function fetchProjectById(projectId) {
 }
 
 async function fetchRecentProject(userId) {
-    const [recentWord, recentProgress, recentSession] = await Promise.all([
+    const [recentWord, recentProgress, recentSession, recentDay] = await Promise.all([
         prisma.projectWordLog.findFirst({
             where: { userId },
             orderBy: { loggedAt: "desc" },
@@ -687,10 +716,29 @@ async function fetchRecentProject(userId) {
             where: { userId },
             orderBy: { loggedAt: "desc" },
             select: { projectId: true, loggedAt: true }
+        }),
+        // Day/streak logs use logDate instead of loggedAt — normalise below
+        prisma.projectDayLog.findFirst({
+            where: { userId },
+            orderBy: { logDate: "desc" },
+            select: { projectId: true, logDate: true }
         })
     ]);
 
-    const candidates = [recentWord, recentProgress, recentSession]
+    // Normalise recentDay so it has a loggedAt field matching the others.
+    // logDate is a date-only value (e.g. 2024-01-15T00:00:00Z) which always
+    // sorts *before* a same-day datetime (e.g. 14:30:00Z).
+    // We push it to end-of-that-day (23:59:59Z) so a streak-only project
+    // whose last day log is today still wins the sort against older logs.
+    const recentDayNorm = recentDay
+        ? (() => {
+              const d = new Date(recentDay.logDate);
+              d.setUTCHours(23, 59, 59, 999);
+              return { projectId: recentDay.projectId, loggedAt: d };
+          })()
+        : null;
+
+    const candidates = [recentWord, recentProgress, recentSession, recentDayNorm]
         .filter(Boolean)
         .sort((a, b) => new Date(b.loggedAt) - new Date(a.loggedAt));
 
@@ -721,6 +769,68 @@ async function fetchRecentProject(userId) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ENROL IN EVENT
+// ─────────────────────────────────────────────────────────────────────────────
+// Enrols a PUBLIC project in an active DAYS_CHALLENGE event.
+// Forces the project to PUBLIC and locks that state for the duration.
+
+async function enrollInEvent(projectId, userId, eventId) {
+    const [project, event] = await Promise.all([
+        prisma.project.findUnique({ where: { id: projectId } }),
+        prisma.platformEvent.findUnique({ where: { id: eventId } })
+    ]);
+
+    if (!project)                         throw new Error("PROJECT_NOT_FOUND");
+    if (project.userId !== userId)        throw new Error("UNAUTHORIZED");
+    if (!event)                           throw new Error("EVENT_NOT_FOUND");
+    if (event.type !== "DAYS_CHALLENGE")  throw new Error("NOT_A_DAYS_CHALLENGE");
+    if (!event.isActive || new Date(event.endDate) <= new Date()) throw new Error("EVENT_NOT_ACTIVE");
+
+    // Guard: project must have been created on or before the event start date
+    const eventStartDay   = new Date(new Date(event.startDate).toDateString());
+    const projectCreatedDay = new Date(new Date(project.createdAt).toDateString());
+    if (projectCreatedDay > eventStartDay) {
+        throw new Error("PROJECT_CREATED_AFTER_EVENT_START");
+    }
+
+    // Guard: project must have a clean streak (no pre-existing streak)
+    if (project.currentStreak > 0) {
+        throw new Error("PROJECT_HAS_EXISTING_STREAK");
+    }
+
+    // Guard: project's consecutiveDaysTarget must match the event's daysTarget exactly
+    if (!project.consecutiveDaysTarget || project.consecutiveDaysTarget !== event.daysTarget) {
+        throw new Error("DAYS_TARGET_MISMATCH");
+    }
+
+    // Guard: this user must not already have a different project enrolled in this event
+    const existingEntry = await prisma.projectEventEntry.findFirst({
+        where: {
+            eventId,
+            disqualified: false,
+            project: { userId }
+        }
+    });
+    if (existingEntry && existingEntry.projectId !== projectId) {
+        throw new Error("USER_ALREADY_ENROLLED");
+    }
+
+    // Force the project to PUBLIC — event projects are always visible
+    if (project.visibility !== "PUBLIC") {
+        await prisma.project.update({
+            where: { id: projectId },
+            data:  { visibility: "PUBLIC" }
+        });
+    }
+
+    return prisma.projectEventEntry.upsert({
+        where:  { projectId_eventId: { projectId, eventId } },
+        create: { projectId, eventId },
+        update: { disqualified: false, disqualifiedAt: null }
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -742,8 +852,12 @@ module.exports = {
     // Day / streak logging
     logDay,
     runStreakBreaker,
+    breakExpiredStreaks,   // alias used by cron job
     computeNewStreak,
     didMissDay,
+
+    // Event enrolment
+    enrollInEvent,
 
     // Summary helpers
     calculateTrackerSummary,

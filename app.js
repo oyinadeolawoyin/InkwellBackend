@@ -20,6 +20,7 @@ const todolistRoutes    = require("./src/routes/todolistRoutes");
 const notesRoutes       = require("./src/routes/noteRoutes");
 const feedbackRoutes    = require("./src/routes/feedbackRoutes"); 
 const discoveryRoutes = require("./src/routes/discoveryroutes");
+const eventRoutes = require("./src/routes/eventroutes");
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -59,6 +60,7 @@ app.use("/api/todos",         todolistRoutes);
 app.use("/api/notes",         notesRoutes);
 app.use("/api/feedback",      feedbackRoutes); 
 app.use("/api/discovery", discoveryRoutes);
+app.use("/api/events", eventRoutes);
 
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError || err.message === "Unsupported file type") {

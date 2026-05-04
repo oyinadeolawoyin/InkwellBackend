@@ -150,7 +150,6 @@ async function getEventCommunityStreak(eventId) {
         .sort((a, b) => b.streak - a.streak);
 
     // communityStreak = what everyone has in common = the minimum streak.
-    // This is the "Day X of the challenge" value shown on the event page.
     const communityStreak = Math.min(...leaderboard.map(e => e.streak));
 
     return {
@@ -163,6 +162,153 @@ async function getEventCommunityStreak(eventId) {
         communityStreak,
         leaderboard
     };
+}
+
+// ─── EVENT WINNERS ────────────────────────────────────────────
+// Returns the recorded winners for a completed DAYS_CHALLENGE event.
+// Called by the community page shoutout section.
+
+async function fetchEventWinners(eventId) {
+    const event = await prisma.platformEvent.findUnique({
+        where: { id: eventId },
+        select: { type: true, title: true, daysTarget: true, endDate: true, isActive: true }
+    });
+
+    if (!event)                          throw new Error("EVENT_NOT_FOUND");
+    if (event.type !== "DAYS_CHALLENGE") throw new Error("NOT_A_DAYS_CHALLENGE");
+
+    const winners = await prisma.eventWinner.findMany({
+        where: { eventId },
+        orderBy: [{ challengeRole: "asc" }, { finalStreak: "desc" }],
+        include: {
+            user: { select: { id: true, username: true, avatar: true } }
+        }
+    });
+
+    return {
+        eventId,
+        eventTitle:  event.title,
+        daysTarget:  event.daysTarget,
+        endDate:     event.endDate,
+        isActive:    event.isActive,
+        winners
+    };
+}
+
+// ─── RECORD EVENT WINNERS (called when admin closes/ends a challenge) ─────────
+// Scans all non-disqualified entries for the event, computes each writer's
+// totals from their ProjectDayLog rows, assigns challenge roles, and writes
+// EventWinner records. Safe to call multiple times — uses upsert.
+//
+// Role logic:
+//   IRON_PEN       — streak equals the event's daysTarget exactly (perfect run)
+//   CHAMPION       — highest total word output among finishers
+//   STREAK_KEEPER  — everyone else who finished (streak >= 1 at end)
+
+async function recordEventWinners(eventId) {
+    const event = await prisma.platformEvent.findUnique({
+        where: { id: eventId },
+        select: { type: true, daysTarget: true, title: true }
+    });
+
+    if (!event)                          throw new Error("EVENT_NOT_FOUND");
+    if (event.type !== "DAYS_CHALLENGE") throw new Error("NOT_A_DAYS_CHALLENGE");
+
+    // Grab all non-disqualified entries with their project + day logs
+    const entries = await prisma.projectEventEntry.findMany({
+        where: { eventId, disqualified: false },
+        include: {
+            project: {
+                select: {
+                    id:            true,
+                    title:         true,
+                    currentStreak: true,
+                    userId:        true,
+                    user: { select: { username: true, avatar: true } },
+                    dayLogs:       { select: { wordsLogged: true, chaptersLogged: true, scenesLogged: true, minutesLogged: true } }
+                }
+            }
+        }
+    });
+
+    if (entries.length === 0) return { count: 0 };
+
+    // Compute totals for each entry
+    const computed = entries.map(e => {
+        const logs  = e.project.dayLogs || [];
+        const total = logs.reduce(
+            (acc, l) => ({
+                words:   acc.words   + (l.wordsLogged    || 0),
+                chapters:acc.chapters+ (l.chaptersLogged || 0),
+                scenes:  acc.scenes  + (l.scenesLogged   || 0),
+                minutes: acc.minutes + (l.minutesLogged  || 0),
+            }),
+            { words: 0, chapters: 0, scenes: 0, minutes: 0 }
+        );
+        return {
+            userId:       e.project.userId,
+            projectId:    e.project.id,
+            projectTitle: e.project.title,
+            username:     e.project.user.username,
+            avatar:       e.project.user.avatar,
+            finalStreak:  e.project.currentStreak,
+            totalWords:   total.words,
+            totalChapters:total.chapters,
+            totalScenes:  total.scenes,
+            totalMinutes: total.minutes,
+        };
+    });
+
+    // Determine champion — highest word count, tie-break by streak
+    const sorted      = [...computed].sort((a, b) => b.totalWords - a.totalWords || b.finalStreak - a.finalStreak);
+    const championId  = sorted[0]?.userId;
+
+    const upserts = computed.map(w => {
+        let role = "STREAK_KEEPER";
+        if (event.daysTarget && w.finalStreak >= event.daysTarget) {
+            role = "IRON_PEN";
+        }
+        if (w.userId === championId && w.totalWords > 0) {
+            // Champion badge overrides STREAK_KEEPER but IRON_PEN can also be champion;
+            // store CHAMPION on top scorer if they're not already IRON_PEN, otherwise
+            // they keep IRON_PEN (rarest badge). To award both, you'd need a many-to-many;
+            // for simplicity we stack CHAMPION on top of IRON_PEN only when word count wins.
+            if (role !== "IRON_PEN") role = "CHAMPION";
+        }
+
+        return prisma.eventWinner.upsert({
+            where:  { eventId_userId: { eventId, userId: w.userId } },
+            update: {
+                projectTitle:  w.projectTitle,
+                username:      w.username,
+                avatar:        w.avatar,
+                finalStreak:   w.finalStreak,
+                totalWords:    w.totalWords,
+                totalChapters: w.totalChapters,
+                totalScenes:   w.totalScenes,
+                totalMinutes:  w.totalMinutes,
+                challengeRole: role,
+            },
+            create: {
+                eventId,
+                userId:        w.userId,
+                projectId:     w.projectId,
+                projectTitle:  w.projectTitle,
+                username:      w.username,
+                avatar:        w.avatar,
+                finalStreak:   w.finalStreak,
+                totalWords:    w.totalWords,
+                totalChapters: w.totalChapters,
+                totalScenes:   w.totalScenes,
+                totalMinutes:  w.totalMinutes,
+                challengeRole: role,
+            }
+        });
+    });
+
+    const results = await Promise.allSettled(upserts);
+    const count   = results.filter(r => r.status === "fulfilled").length;
+    return { count };
 }
 
 // ─── ADMIN — CREATE ───────────────────────────────────────────
@@ -225,6 +371,8 @@ module.exports = {
     fetchAllEvents,
     fetchEventPublicProjects,
     getEventCommunityStreak,
+    fetchEventWinners,
+    recordEventWinners,
     createEvent,
     updateEvent,
     deleteEvent,

@@ -63,13 +63,14 @@ model User {
 
   discoveryStories            DiscoveryStory[]
   discoveryLikes              DiscoveryLike[]
+
+  // ── event winners ───────────────────────────────────────────────────────
+  eventWins                   EventWinner[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PLATFORM EVENTS  (carousel notices + days challenges)
 // ─────────────────────────────────────────────────────────────────────────────
-
-
 model PlatformEvent {
   id          Int          @id @default(autoincrement())
   title       String
@@ -86,6 +87,9 @@ model PlatformEvent {
 
   // Projects currently enrolled in this event (public + streak still alive)
   entries     ProjectEventEntry[]
+
+  // Winners recorded after the event ends
+  winners     EventWinner[]
 
   @@index([isActive])
   @@index([type])
@@ -111,6 +115,30 @@ model ProjectEventEntry {
   @@index([eventId])
   @@index([projectId])
   @@index([disqualified])
+}
+
+model EventWinner {
+  id              Int           @id @default(autoincrement())
+  eventId         Int
+  userId          Int
+  projectId       Int
+  projectTitle    String        // snapshot — project title at time of win
+  username        String        // snapshot — in case username ever changes
+  avatar          String?       // snapshot
+  finalStreak     Int           // how many days they maintained
+  totalWords      Int           @default(0)
+  totalChapters   Int           @default(0)
+  totalScenes     Int           @default(0)
+  totalMinutes    Int           @default(0)
+  challengeRole   ChallengeRole // the badge/role awarded
+  createdAt       DateTime      @default(now())
+
+  event           PlatformEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])   // one winner record per user per event
+  @@index([eventId])
+  @@index([userId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -236,10 +264,14 @@ model ProjectProgressLog {
 }
 
 model ProjectSessionLog {
-  id         Int      @id @default(autoincrement())
-  projectId  Int
-  userId     Int
-  loggedAt   DateTime @default(now())
+  id              Int      @id @default(autoincrement())
+  projectId       Int
+  userId          Int
+  loggedAt        DateTime @default(now())
+  wordsWritten    Int?
+  chaptersWritten Int?
+  scenesWritten   Int?
+  minutesWritten  Int?
 
   project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
@@ -891,4 +923,10 @@ enum EventType {
   DAYS_CHALLENGE  // e.g. "Write 5 days straight" — uses daysTarget + streak system
   WORKSHOP        // Scheduled workshop or live event
   OTHER
+}
+
+enum ChallengeRole {
+  STREAK_KEEPER   // Completed the full streak — stayed in until the end
+  CHAMPION        // Top writer by total output (words/chapters/scenes)
+  IRON_PEN        // Perfect streak — logged every single day of the event
 }

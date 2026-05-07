@@ -182,7 +182,7 @@ async function changePassword(req, res) {
   }
 
   try {
-    const existingUser = await userService.fetchUser(userId);
+    const existingUser = await userService.fetchUserWithPassword(userId);
 
     if (existingUser.password) {
       if (!currentPassword) {

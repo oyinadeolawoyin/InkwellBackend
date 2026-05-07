@@ -5,6 +5,7 @@ const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const multer = require("multer");
 require("./jobs/streakbreaker.job");
+const rateLimit = require("express-rate-limit");
 
 const authRoutes        = require("./src/routes/authRoutes");
 const groupSprintRoutes = require("./src/routes/groupSprintRoutes");
@@ -14,7 +15,6 @@ const quoteRoutes       = require("./src/routes/quoteRoutes");
 const notificationRoutes = require("./src/routes/notificationRoutes");
 const blogRoutes        = require("./src/routes/blogRoutes");
 const snippetRoutes     = require("./src/routes/snippetroutes");
-const scheduleRoutes    = require("./src/routes/scheduleroutes");
 const soundscapesRoutes = require("./src/routes/soundscaperoutes");
 const todolistRoutes    = require("./src/routes/todolistRoutes");
 const notesRoutes       = require("./src/routes/noteRoutes");
@@ -25,27 +25,21 @@ const eventRoutes = require("./src/routes/eventroutes");
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "https://inkwell.com.ng",
-  "https://inkwellinky.vercel.app",
-];
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGIN,
+  credentials: true, // needed because you use cookies for JWT
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+}));
 
-const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
-  credentials: true,
-};
-
-app.use(cors(corsOptions));
 app.use(cookieParser());
 
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // max 100 requests per IP per 15 min
+  message: { error: "Too many requests, slow down." }
+});
+
+app.use("/api/", limiter); // applies to all your API routes
 app.use("/api/auth",          authRoutes);
 app.use("/api/sprint",        groupSprintRoutes);
 app.use("/api/projects",      projectRoutes);
@@ -54,7 +48,6 @@ app.use("/api/quote",         quoteRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/blog",          blogRoutes);
 app.use("/api/snippets",      snippetRoutes);
-app.use("/api/schedule",      scheduleRoutes);
 app.use("/api/soundscapes",   soundscapesRoutes);
 app.use("/api/todos",         todolistRoutes);
 app.use("/api/notes",         notesRoutes);

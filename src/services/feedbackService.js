@@ -12,7 +12,7 @@ const TIER_MAX_WORDS = {
   TIER_5000: 5000,
 };
 
-const GENERAL_FEEDBACK_MIN_WORDS = 100;
+const GENERAL_FEEDBACK_MIN_WORDS = 150;
 
 function countWords(text) {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -341,21 +341,8 @@ async function getOutdatedSubmissions({ page = 1, limit = 10 }) {
 
 async function createResponse(criticId, submissionId, data) {
   const {
-    overallRating,
-    clarityRating,
-    pacingRating,
-    believabilityRating,
     generalFeedback,
   } = data;
-
-  // ── Validation ─────────────────────────────────────────────────────────────
-  for (const [key, val] of Object.entries({
-    overallRating, clarityRating, pacingRating, believabilityRating,
-  })) {
-    if (!Number.isInteger(val) || val < 1 || val > 5) {
-      throw new Error(`${key} must be an integer between 1 and 5.`);
-    }
-  }
 
   if (!generalFeedback?.trim()) {
     throw new Error("General feedback cannot be empty.");
@@ -369,7 +356,7 @@ async function createResponse(criticId, submissionId, data) {
   });
 
   if (!submission)                    throw new Error("Submission not found.");
-  if (!submission.isOpen)             throw new Error("This submission is no longer accepting feedback.");
+  if (!submission.isOpen && !submission.isOutdated) throw new Error("This submission is no longer accepting feedback.");
   if (submission.userId === criticId) throw new Error("You cannot critique your own work.");
 
   // 1. CALCULATE POINTS (Full points for Spotlight, Half for Outdated)
@@ -381,10 +368,6 @@ async function createResponse(criticId, submissionId, data) {
       data: {
         submissionId,
         criticId,
-        overallRating,
-        clarityRating,
-        pacingRating,
-        believabilityRating,
         generalFeedback: generalFeedback.trim(),
         pointsEarned: pointsAwarded, // Log exactly what they earned
       },
@@ -422,7 +405,7 @@ async function updateResponse(responseId, criticId, data) {
   if (!response)                      throw new Error("Response not found.");
   if (response.criticId !== criticId) throw new Error("Not authorised.");
 
-  const { overallRating, clarityRating, pacingRating, believabilityRating, generalFeedback } = data;
+  const { generalFeedback } = data;
 
   if (generalFeedback !== undefined) {
     validateGeneralFeedback(generalFeedback);
@@ -431,10 +414,6 @@ async function updateResponse(responseId, criticId, data) {
   return prisma.feedbackResponse.update({
     where: { id: responseId },
     data: {
-      ...(overallRating       !== undefined && { overallRating }),
-      ...(clarityRating       !== undefined && { clarityRating }),
-      ...(pacingRating        !== undefined && { pacingRating }),
-      ...(believabilityRating !== undefined && { believabilityRating }),
       ...(generalFeedback     !== undefined && { generalFeedback: generalFeedback.trim() }),
     },
   });
@@ -666,7 +645,44 @@ async function deleteParagraphCommentReply(replyId, authorId) {
 }
 
 
+// ─── RESPONSES BY USER (for profile page) ────────────────────────────────────
+
+async function getResponsesByUser(userId, { page = 1, limit = 10 } = {}) {
+  const skip = (page - 1) * limit;
+
+  const [responses, total] = await Promise.all([
+    prisma.feedbackResponse.findMany({
+      where:   { criticId: userId },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit,
+      include: {
+        submission: {
+          select: { id: true, title: true, genre: true },
+        },
+        _count: { select: { upvotes: true } },
+      },
+    }),
+    prisma.feedbackResponse.count({ where: { criticId: userId } }),
+  ]);
+
+  // Normalise field names so the frontend CritiqueRow component works:
+  // it reads response.content but the model stores generalFeedback
+  const normalised = responses.map(r => ({
+    ...r,
+    content: r.generalFeedback,
+  }));
+
+  return {
+    responses:  normalised,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit),
+  };
+}
+
 module.exports = {
+  getResponsesByUser,
   getUserById,
   getAllUsersExcept,
   createSubmission,

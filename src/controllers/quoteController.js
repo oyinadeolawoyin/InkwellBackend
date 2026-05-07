@@ -8,7 +8,9 @@ const { notifyUser } = require("../services/notificationService");
  */
 async function createQuote(req, res) {
   const { title, content } = req.body;
+  const isAdmin = req.user.role === "ADMIN";
 
+  if (!isAdmin) return res.status(403).json({ message: "Not authorized." });
   // Validation
   if (!content || !content.trim()) {
     return res.status(400).json({ message: "Quote content is required" });
@@ -56,6 +58,10 @@ async function updateQuote(req, res) {
   const { title, content } = req.body;
   const quoteId = Number(req.params.quoteId);
 
+  const isAdmin = req.user.role === "ADMIN";
+
+  if (!isAdmin) return res.status(403).json({ message: "Not authorized." });
+  
   try {
     const quote = await quoteService.updateQuote({ quoteId, title, content });
     res.status(200).json({ quote });

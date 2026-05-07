@@ -734,10 +734,10 @@ model FeedbackResponse {
   id                  Int                @id @default(autoincrement())
   submissionId        Int
   criticId            Int
-  overallRating       Int                // 1–5
-  clarityRating       Int                // 1–5
-  pacingRating        Int                // 1–5
-  believabilityRating Int                // 1–5
+  overallRating       Int?                // 1–5
+  clarityRating       Int?                // 1–5
+  pacingRating        Int?                // 1–5
+  believabilityRating Int?                // 1–5
   generalFeedback     String             // ≥100 words enforced in service
   pointsEarned        Int
   createdAt           DateTime           @default(now())
@@ -908,6 +908,7 @@ enum WordCountTier {
   TIER_2000  // ≤2,000 words — costs/earns 20 pts
   TIER_3000  // ≤3,000 words — costs/earns 30 pts
   TIER_4000  // ≤4,000 words — costs/earns 40 pts
+  TIER_5000  // ≤5,000 words — costs/earns 50 pts 
 }
 
 enum WritingPhase {

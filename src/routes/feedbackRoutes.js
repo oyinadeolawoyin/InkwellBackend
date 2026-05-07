@@ -12,17 +12,20 @@ router.get("/submissions/spotlight",  ctrl.getSpotlight);
 router.get("/submissions/outdated", ctrl.getArchive);
 
 router.get("/points/me", authenticateJWT, ctrl.getMyWallet);
-router.get("/points/:userId",  ctrl.getUserWallet);
+router.get("/points/:userId",  authenticateJWT, ctrl.getUserWallet);
 
 // ─── SUBMISSIONS ─────────────────────────────────────────────────────────────
 
-router.get("/submissions/mine",         authenticateJWT, ctrl.getUserSubmissions);
-router.get("/submissions",                ctrl.getSubmissions);
-router.get("/submissions/:id",           ctrl.getSubmissionById);
-router.post("/submissions",             authenticateJWT, ctrl.createSubmission);
+router.get("/submissions/mine", authenticateJWT, ctrl.getUserSubmissions);
+// router.get("/submissions",                ctrl.getSubmissions);
+router.get("/submissions/:id", authenticateJWT, ctrl.getSubmissionById);
+router.post("/submissions",    authenticateJWT, ctrl.createSubmission);
 router.patch("/submissions/:id/close",  authenticateJWT, ctrl.closeSubmission);
-router.patch("/submissions/:id",        authenticateJWT, ctrl.updateSubmission);
-router.delete("/submissions/:id",       authenticateJWT, ctrl.deleteSubmission);
+router.patch("/submissions/:id", authenticateJWT, ctrl.updateSubmission);
+router.delete("/submissions/:id", authenticateJWT, ctrl.deleteSubmission);
+
+// ─── RESPONSES BY USER (profile page) ───────────────────────────────────────
+router.get("/responses/by-user/:userId", ctrl.getResponsesByUser);
 
 // ─── FEEDBACK RESPONSES (full critiques) ─────────────────────────────────────
 

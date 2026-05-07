@@ -50,7 +50,9 @@ async function getPending(req, res) {
 // PATCH /soundscapes/:soundscapeId/approve — admin approves, soundscape goes live
 async function approve(req, res) {
   const soundscapeId = Number(req.params.soundscapeId);
+  const isAdmin = req.user.role === "ADMIN";
 
+  if (!isAdmin) return res.status(403).json({ message: "Not authorized." });
   try {
     const existing = await soundscapeService.findSoundscape(soundscapeId);
     if (!existing) return res.status(404).json({ message: "Soundscape not found." });

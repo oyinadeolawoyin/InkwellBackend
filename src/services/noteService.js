@@ -7,22 +7,22 @@ async function createNote({ title, note, projectId, userId }) {
     });
 }
 
-async function deleteNote(noteId) {
+async function deleteNote(noteId, userId) {
     return await prisma.note.delete({
-        where: { id: noteId },   // FIX: field is `id`, not `noteId`
+        where: { id: noteId, userId },   // FIX: field is `id`, not `noteId`
     });
 }
 
-async function fetchNoteById(noteId) {
+async function fetchNoteById(noteId, userId) {
     return prisma.note.findUnique({
-        where: { id: noteId },   // FIX: field is `id`, not `noteId`
+        where: { id: noteId, userId },   // FIX: field is `id`, not `noteId`
     });
 }
 
 // FIX: was querying prisma.project instead of prisma.note, wrong sort syntax
 async function fetchNotes(projectId) {
     return prisma.note.findMany({
-        where:   { projectId },
+        where:   { projectId, userId },
         orderBy: { createdAt: "desc" },
     });
 }

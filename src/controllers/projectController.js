@@ -37,10 +37,7 @@ async function createProject(req, res) {
     // if (consecutiveDaysTarget !== undefined && Number(consecutiveDaysTarget) <= 0) {
     //     return res.status(400).json({ message: "consecutiveDaysTarget must be a positive number." });
     // }
-    console.log("t", title, "d",description, "l",link, "g",genre, "v",visibility,
-        "wc",targetWordCount, "de",deadline, "dwe",daysPerWeek,
-        "tc",targetChapters, "ts",targetScenes, "sg",sessionGoalType, "sco",sessionGoalCount,
-        "p",phase, "cota",consecutiveDaysTarget)
+    
     try {
         const project = await projectService.createProject(
             Number(userId), title, description, link, genre, visibility,

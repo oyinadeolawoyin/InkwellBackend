@@ -96,10 +96,8 @@ async function fetchUsers() {
     select: {
       id: true,
       username: true,
-      email: true,
       avatar: true,
       bio: true,
-      createdAt: true
     },
     orderBy: {
       id: 'desc'
@@ -115,6 +113,26 @@ async function fetchUsers() {
 async function fetchUser(userId) {
   return await prisma.user.findUnique({
     where: { id: userId },
+    select: {
+      id: true,
+      username: true,
+      role: true,
+      createdAt: true,
+    }
+  });
+}
+
+// Add this to userService.js — internal use only, never sent to frontend
+async function fetchUserWithPassword(userId) {
+  return await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      username: true,
+      email: true,
+      password: true, // needed for password verification only
+      role: true,
+    }
   });
 }
 
@@ -152,6 +170,7 @@ module.exports = {
   updateUser,
   fetchUsers,
   fetchUser,
+  fetchUserWithPassword,
   deleteUser,
   fetchFoundingWriters,
 };

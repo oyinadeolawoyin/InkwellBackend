@@ -27,11 +27,12 @@ async function createNote(req, res) {
 //      also noteId now comes from req.body to match the route (DELETE /delete)
 async function deleteNote(req, res) {
     const noteId = Number(req.body.noteId);
+    const userId    = req.user.id;
 
     if (!noteId) return res.status(400).json({ message: "noteId is required." });
 
     try {
-        const note = await noteService.fetchNoteById(noteId);
+        const note = await noteService.fetchNoteById(noteId, userId);
         if (!note) return res.status(404).json({ message: "Note not found." });
 
         await noteService.deleteNote(noteId);
@@ -45,9 +46,10 @@ async function deleteNote(req, res) {
 // FIX: was calling projectService.fetchListById instead of projectService.fetchProjectById
 async function fetchNotes(req, res) {
     const projectId = Number(req.params.projectId);
+    const userId    = req.user.id;
 
     try {
-        const project = await projectService.fetchProjectById(projectId);
+        const project = await projectService.fetchProjectById(projectId, userId);
         if (!project) return res.status(404).json({ message: "Project not found." });
 
         const notes = await noteService.fetchNotes(projectId);

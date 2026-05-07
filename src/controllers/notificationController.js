@@ -53,7 +53,7 @@ async function getNotifications(req, res) {
  */
 async function markRead(req, res) {
     try {
-        const userId = Number(req.params.userId);
+        const userId = Number(req.user.id);
         await notificationsService.markNotificationRead(userId)
         res.status(200).json({ message: "Notification marked as read" });
     } catch (error) {

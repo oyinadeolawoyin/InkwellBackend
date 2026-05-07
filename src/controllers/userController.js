@@ -4,11 +4,6 @@ const fileUploader = require("../utilis/fileUploader");
 
 async function updateUser(req, res) {
   try {
-    // Guard: multer only parses multipart; JSON-only requests (e.g. email update)
-    // need express.json() in app.js. This guard prevents a crash if body is missing.
-    if (!req.body) {
-      return res.status(400).json({ message: "Request body is missing. Ensure express.json() middleware is registered in app.js." });
-    }
     const { username, email, bio, dateOfBirth } = req.body;
     const userId = Number(req.user.id);
     const file = req.file;
@@ -79,15 +74,15 @@ async function updateUser(req, res) {
   }
 }
 
-async function fetchUsers(req, res) {
-  try {
-    const users = await userService.fetchUsers();
-    res.status(200).json({ users });
-  } catch (error) {
-    console.error("Fetch users error:", error);
-    res.status(500).json({ message: error.message || "Something went wrong. Please try again." });
-  }
-}
+// async function fetchUsers(req, res) {
+//   try {
+//     const users = await userService.fetchUsers();
+//     res.status(200).json({ users });
+//   } catch (error) {
+//     console.error("Fetch users error:", error);
+//     res.status(500).json({ message: error.message || "Something went wrong. Please try again." });
+//   }
+// }
 
 async function fetchUser(req, res) {
   const userId = req.params.userId;
@@ -123,7 +118,7 @@ async function fetchFoundingWriters(req, res) {
 
 module.exports = {
   updateUser,
-  fetchUsers,
+  // fetchUsers,
   fetchUser,
   deleteUser,
   fetchFoundingWriters,

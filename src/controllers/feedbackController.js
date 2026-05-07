@@ -385,7 +385,21 @@ async function deleteParagraphCommentReply(req, res) {
   }
 }
 
+async function getResponsesByUser(req, res) {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    const result = await feedbackService.getResponsesByUser(
+      Number(req.params.userId),
+      { page: Number(page), limit: Math.min(Number(limit), 50) }
+    );
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+}
+
 module.exports = {
+  getResponsesByUser,
   getMyWallet,
   getUserWallet,
   createSubmission,

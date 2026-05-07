@@ -181,8 +181,10 @@ async function updateStory(req, res) {
 
 async function approveStory(req, res) {
   const storyId = Number(req.params.storyId);
+  const isAdmin = req.user.role === "ADMIN";
 
   try {
+    if (!isAdmin) return res.status(403).json({ message: "Not authorized." });
     const existing = await discoveryService.findStory(storyId);
     if (!existing) return res.status(404).json({ message: "Story not found." });
 

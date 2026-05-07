@@ -33,13 +33,13 @@ app.use(cors({
 
 app.use(cookieParser());
 
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // max 100 requests per IP per 15 min
-  message: { error: "Too many requests, slow down." }
-});
+// const limiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, // 15 minutes
+//   max: 100, // max 100 requests per IP per 15 min
+//   message: { error: "Too many requests, slow down." }
+// });
 
-app.use("/api/", limiter); // applies to all your API routes
+// app.use("/api/", limiter); // applies to all your API routes
 app.use("/api/auth",          authRoutes);
 app.use("/api/sprint",        groupSprintRoutes);
 app.use("/api/projects",      projectRoutes);

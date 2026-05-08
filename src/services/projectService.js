@@ -46,7 +46,7 @@ function calculateDailyTarget(target, current, deadline, daysPerWeek) {
 // Returns the new streak value based on lastLogDate and whether today is already logged.
 // Rules:
 //   - lastLogDate is null → streak becomes 1 (first ever log)
-//   - lastLogDate is yesterday → streak increments
+//   - lastLogDate is yesterday → streak increments (uses DB value, even if cron zeroed it)
 //   - lastLogDate is today → no change (already logged today)
 //   - lastLogDate is older → missed a day, reset to 1
 function computeNewStreak(currentStreak, lastLogDate) {
@@ -57,9 +57,9 @@ function computeNewStreak(currentStreak, lastLogDate) {
     const last = toUTCDay(lastLogDate);
     const diffDays = Math.round((today - last) / (1000 * 60 * 60 * 24));
 
-    if (diffDays === 0) return currentStreak;        // already logged today, no change
-    if (diffDays === 1) return currentStreak + 1;    // yesterday → keep the chain going
-    return 1;                                        // missed one or more days → reset
+    if (diffDays === 0) return currentStreak === 0 ? 1 : currentStreak; // cron may have zeroed it mid-day but user is logging today
+    if (diffDays === 1) return currentStreak + 1;                        // yesterday → keep the chain going
+    return 1;                                                             // missed one or more days → reset
 }
 
 // Returns true if a day was missed (streak needs to reset to 0 externally if needed).
@@ -417,9 +417,15 @@ async function logDay(projectId, userId, { wordsLogged = 0, chaptersLogged = 0, 
 
     // ── Event disqualification check ─────────────────────────────────────────
     // If this is the FIRST log of the day (not alreadyToday), a missed-day reset
-    // (newStreak === 1 AND project.currentStreak > 1) means the writer broke
-    // their chain. Disqualify from any active DAYS_CHALLENGE entries and go PRIVATE.
-    const streakBroken = !alreadyToday && newStreak === 1 && project.currentStreak > 1;
+    // means the writer broke their chain. We detect this in two ways:
+    //   1. newStreak === 1 AND project.currentStreak > 1  → logDay caught the break first
+    //   2. newStreak === 1 AND project.currentStreak === 0 → cron already zeroed it, but
+    //      lastLogDate is 2+ days ago, confirming the break happened
+    const cronAlreadyBroke = !alreadyToday && newStreak === 1 && project.currentStreak === 0
+        && project.lastLogDate
+        && Math.round((toUTCDay(new Date()) - toUTCDay(project.lastLogDate)) / (1000 * 60 * 60 * 24)) > 1;
+
+    const streakBroken = !alreadyToday && newStreak === 1 && (project.currentStreak > 1 || cronAlreadyBroke);
 
     if (streakBroken) {
         const challengeEntries = project.eventEntries.filter(
@@ -464,9 +470,10 @@ async function breakExpiredStreaks() {
 }
 
 async function runStreakBreaker() {
+    // A project has broken its streak if its lastLogDate is strictly before yesterday
+    // (i.e. they missed yesterday entirely). Projects that logged any time yesterday are safe.
     const yesterday = toUTCDay(new Date(Date.now() - 86400000));
 
-    // Find projects whose lastLogDate is before yesterday (they missed at least one day)
     const stalledProjects = await prisma.project.findMany({
         where: {
             currentStreak: { gt: 0 },
@@ -478,6 +485,7 @@ async function runStreakBreaker() {
         select: {
             id: true,
             currentStreak: true,
+            lastLogDate: true,
             visibility: true,
             eventEntries: {
                 where: { disqualified: false },
@@ -488,7 +496,15 @@ async function runStreakBreaker() {
 
     const now = new Date();
     for (const project of stalledProjects) {
-        // Always reset streak to 0
+        // Extra guard against timezone edge cases: skip if they actually logged yesterday
+        if (project.lastLogDate) {
+            const last = toUTCDay(project.lastLogDate);
+            const diffDays = Math.round((yesterday - last) / (1000 * 60 * 60 * 24));
+            if (diffDays < 1) continue;
+        }
+
+        // Reset to 0 (broken state). lastLogDate is intentionally NOT changed here so
+        // that logDay() can still detect the gap and correctly restart the streak at 1.
         await prisma.project.update({
             where: { id: project.id },
             data:  { currentStreak: 0 }
@@ -499,7 +515,6 @@ async function runStreakBreaker() {
         );
 
         if (challengeEntries.length > 0) {
-            // Disqualify from active challenges and flip to PRIVATE
             await prisma.projectEventEntry.updateMany({
                 where: {
                     projectId: project.id,

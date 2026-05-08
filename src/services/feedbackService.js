@@ -357,7 +357,7 @@ async function createResponse(criticId, submissionId, data) {
 
   if (!submission)                    throw new Error("Submission not found.");
   if (!submission.isOpen && !submission.isOutdated) throw new Error("This submission is no longer accepting feedback.");
-  if (submission.userId === criticId) throw new Error("You cannot critique your own work.");
+  if (submssion.userId === criticId) throw new Error("You cannot critique your own work.");
 
   // 1. CALCULATE POINTS (Full points for Spotlight, Half for Outdated)
   const pointsAwarded = pointsService.calculateCritiquePoints(submission.wordCountTier, submission.isOutdated);

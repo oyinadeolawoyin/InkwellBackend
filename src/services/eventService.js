@@ -120,7 +120,7 @@ async function getEventCommunityStreak(eventId) {
                     id:            true,
                     title:         true,
                     currentStreak: true,
-                    user:          { select: { username: true, avatar: true } }
+                    user:          { select: { id: true, username: true, avatar: true } }
                 }
             }
         }
@@ -143,6 +143,7 @@ async function getEventCommunityStreak(eventId) {
         .map(e => ({
             projectId:    e.project.id,
             projectTitle: e.project.title,
+            userId:       e.project.user.id,
             username:     e.project.user.username,
             avatar:       e.project.user.avatar,
             streak:       e.project.currentStreak

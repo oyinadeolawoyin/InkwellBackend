@@ -88,7 +88,7 @@ async function fetchGroupSprint(groupSprintId) {
     include: {
       sprints: {
         include: {
-          user: { select: { username: true, avatar: true, discordId: true } },
+          user: { select: { id: true, username: true, avatar: true, discordId: true } },
           soundscape: {
             select: { id: true, name: true, fileUrl: true, creatorName: true }
           },
@@ -96,7 +96,7 @@ async function fetchGroupSprint(groupSprintId) {
         }
       },
       _count: { select: { sprints: true } },
-      user: { select: { username: true, avatar: true } }
+      user: { select: { id: true, username: true, avatar: true } }
     }
   });
 }
@@ -112,11 +112,11 @@ async function fetchAllActiveGroupSprints({ take, skip }) {
       take,
       orderBy: { startedAt: "desc" },
       include: {
-        user: { select: { username: true, avatar: true } },
+        user: { select: { id: true, username: true, avatar: true } },
         sprints: {
           select: {
             userId: true,
-            user: { select: { username: true, avatar: true } }
+            user: { select: { id: true, username: true, avatar: true } }
           }
         },
         _count: { select: { sprints: true } }
@@ -136,13 +136,13 @@ async function fetchLastGroupSprint() {
       sprints: {
         orderBy: { wordsWritten: "desc" },
         include: {
-          user: { select: { username: true, avatar: true } },
+          user: { select: { id: true, username: true, avatar: true } },
           soundscape: {
             select: { id: true, name: true, fileUrl: true, creatorName: true }
           }
         }
       },
-      user: { select: { username: true, avatar: true } },
+      user: { select: { id: true, username: true, avatar: true } },
       _count: { select: { sprints: true } }
     }
   });
@@ -239,7 +239,7 @@ async function fetchLoginUserSprint(userId) {
   return prisma.sprint.findFirst({
     where: { userId, isActive: true },
     include: {
-      user: { select: { username: true, avatar: true } },
+      user: { select: { id: true, username: true, avatar: true } },
       soundscape: {
         select: { id: true, name: true, fileUrl: true, creatorName: true }
       },

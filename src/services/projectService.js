@@ -681,12 +681,13 @@ async function fetchPublicProjects() {
             consecutiveDaysTarget: true,
             currentStreak:        true,
             lastLogDate:          true,
-            user: { select: { username: true, avatar: true } },
+            user: { select: { id: true, username: true, avatar: true } },
             // Include active event entries so the frontend knows which challenge they're in
             eventEntries: {
                 where: { disqualified: false },
-                include: { event: { select: { id: true, title: true, type: true, daysTarget: true, endDate: true } } }
-            }
+                include: { event: { select: { id: true, title: true, type: true, daysTarget: true, startDate: true, endDate: true } } }
+            },
+            dayLogs: { orderBy: { logDate: "desc" }, take: 30 }
         },
         orderBy: { updatedAt: "desc" }
     });

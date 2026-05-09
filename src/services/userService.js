@@ -116,6 +116,8 @@ async function fetchUser(userId) {
     select: {
       id: true,
       username: true,
+      bio: true,       
+      avatar: true,
       role: true,
       createdAt: true,
     }

@@ -17,7 +17,7 @@ router.get("/points/:userId",  authenticateJWT, ctrl.getUserWallet);
 // ─── SUBMISSIONS ─────────────────────────────────────────────────────────────
 
 router.get("/submissions/mine", authenticateJWT, ctrl.getUserSubmissions);
-// router.get("/submissions",                ctrl.getSubmissions);
+router.get("/submissions",     ctrl.getSubmissions);
 router.get("/submissions/:id", authenticateJWT, ctrl.getSubmissionById);
 router.post("/submissions",    authenticateJWT, ctrl.createSubmission);
 router.patch("/submissions/:id/close",  authenticateJWT, ctrl.closeSubmission);

@@ -236,7 +236,7 @@ async function forgetPassword(req, res) {
 
     await authService.saveResetToken(user.id, resetToken, resetTokenExpiry);
 
-    const resetLink = `inkwellinky.vercel.app/reset-password?token=${resetToken}`;
+    const resetLink = `/reset-password?token=${resetToken}`;
 
     await sendEmail(
       user.email,

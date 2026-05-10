@@ -76,13 +76,17 @@ async function getUserSubmissions(req, res) {
 }
 
 async function getSubmissions(req, res) {
+  // When userId is present (profile page), pass it through without forcing isOpen
+  // so both open and closed submissions are returned for that user.
   try {
     const { page = 1, limit = 20, genre, isOpen } = req.query;
     const result = await feedbackService.getSubmissions({
       page:   Number(page),
       limit:  Math.min(Number(limit), 50),
       genre,
-      isOpen: isOpen !== "false",
+      userId: req.query.userId ? Number(req.query.userId) : undefined,
+      // Only apply isOpen filter when not filtering by a specific user
+      isOpen: req.query.userId ? undefined : (isOpen !== "false"),
     });
     res.json(result);
   } catch (err) {
@@ -114,6 +118,18 @@ async function closeSubmission(req, res) {
   }
 }
 
+
+async function reopenSubmission(req, res) {
+  try {
+    const submission = await feedbackService.reopenSubmission(
+      Number(req.params.id),
+      req.user.id
+    );
+    res.json(submission);
+  } catch (err) {
+    res.status(errStatus(err.message)).json({ message: err.message });
+  }
+}
 async function updateSubmission(req, res) {
   try {
     const submission = await feedbackService.updateSubmission(
@@ -407,6 +423,7 @@ module.exports = {
   getSubmissionById,
   getUserSubmissions,
   closeSubmission,
+  reopenSubmission,
   updateSubmission,
   deleteSubmission,
   getSpotlight,

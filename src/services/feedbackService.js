@@ -155,7 +155,9 @@ async function createSubmission(userId, data) {
 async function getSubmissions({ page = 1, limit = 20, genre, isOpen = true, userId } = {}) {
   const skip  = (page - 1) * limit;
   const where = {};
-  if (isOpen !== undefined) where.isOpen = isOpen;
+  // When a userId is given (profile page), show ALL their submissions (open + closed).
+  // isOpen filter only applies to the global public feed.
+  if (!userId && isOpen !== undefined) where.isOpen = isOpen;
   if (genre)  where.genre  = genre;
   if (userId) where.userId = userId;
 
@@ -216,6 +218,17 @@ async function closeSubmission(submissionId, userId) {
   return prisma.feedbackSubmission.update({
     where: { id: submissionId },
     data:  { isOpen: false },
+  });
+}
+
+async function reopenSubmission(submissionId, userId) {
+  const sub = await prisma.feedbackSubmission.findUnique({ where: { id: submissionId } });
+  if (!sub) throw new Error("Submission not found.");
+  if (sub.userId !== userId) throw new Error("Not authorised.");
+  if (sub.isOutdated) throw new Error("Outdated submissions cannot be reopened.");
+  return prisma.feedbackSubmission.update({
+    where: { id: submissionId },
+    data:  { isOpen: true },
   });
 }
 
@@ -689,6 +702,7 @@ module.exports = {
   getSubmissions,
   getSubmissionById,
   closeSubmission,
+  reopenSubmission,
   deleteSubmission,
   updateSubmission,
   getSpotlightSubmissions,

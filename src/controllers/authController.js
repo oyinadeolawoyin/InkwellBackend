@@ -242,7 +242,7 @@ async function forgetPassword(req, res) {
 
     await authService.saveResetToken(user.id, resetToken, resetTokenExpiry);
 
-    const resetLink = `/reset-password?token=${resetToken}`;
+    const resetLink = `https://inkwell.com.ng/reset-password?token=${resetToken}`;
 
     await sendEmail(
       user.email,

@@ -69,7 +69,7 @@ async function signup(req, res) {
     const token = jwt.generateToken(user);
     res.cookie("token", token, cookieOptions).status(201).json({
       token,
-      user: { id: user.id, username: user.username, email: user.email, role: user.role },
+      user: { id: user.id, username: user.username, email: user.email, role: user.role, avatar: user.avatar ?? null },
     });
   } catch (error) {
     console.error("Signup error:", error);
@@ -130,6 +130,7 @@ async function login(req, res) {
         email: user.email,
         role: user.role,
         discordId: user.discordId,
+        avatar: user.avatar ?? null,
       },
     });
   } catch (error) {
@@ -153,7 +154,12 @@ function logout(req, res) {
  */
 async function getMe(req, res) {
   try {
-    res.status(200).json(req.user);
+    // Re-fetch from DB so avatar and other mutable fields are always fresh
+    const freshUser = await userService.fetchUser(Number(req.user.id));
+    if (!freshUser) {
+      return res.status(401).json({ message: "User not found." });
+    }
+    res.status(200).json({ user: freshUser });
   } catch (error) {
     console.error("Get me error:", error);
     res.status(500).json({ message: "Failed to fetch user" });

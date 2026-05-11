@@ -52,7 +52,7 @@ async function endGroupSprint(req, res) {
     const user    = req.user;
     const message = "You did great for arranging the sprint and helping others write. You should be proud of yourself 🌱";
     const link    = `/group-sprint/${groupSprintId}`;
-    await notifyUser(user, message, link);
+    await notifyUser(user, message, link, "sprint_end_kudos");
 
     // if (!groupSprint.isActive) {
     //   notifyGroupSprintEnded({
@@ -186,7 +186,7 @@ async function checkoutSprint(req, res) {
     const user    = req.user;
     const message = "Great job showing up and writing today. Every word counts 🌱";
     const link    = `/snippets`;
-    await notifyUser(user, message, link);
+    await notifyUser(user, message, link, "sprint_checkout_kudos");
 
     // notifyMemberCheckedOut({
     //   username:     req.user.username,

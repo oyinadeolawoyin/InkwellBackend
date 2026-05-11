@@ -24,7 +24,7 @@ async function notifyAllUsersAboutEvent(event, phase) {
 
     const link = `/events/${event.id}`;
 
-    await Promise.allSettled(users.map((user) => notifyUser(user, message, link)));
+    await Promise.allSettled(users.map((user) => notifyUser(user, message, link, phase === "start" ? "event_started" : "event_ended")));
   } catch (err) {
     console.error("notifyAllUsersAboutEvent error:", err);
   }

@@ -66,47 +66,95 @@ async function addNotification({ username, link, message, userId }) {
   });
 }
 
-/**
- * Notify a user through multiple channels (in-app, push, email)
- * @param {Object} user - User object
- * @param {number} user.id - User ID
- * @param {string} user.username - Username
- * @param {string} user.email - User's email address
- * @param {string} message - Notification message text
- * @param {string} link - URL link related to the notification
- * @returns {Promise<void>}
- */
-async function notifyUser(user, message, link) {
-  // 1. Save in-app notification in database
-  await addNotification({
-    username: user.username,
-    message,
-    link: link,
-    userId: Number(user.id)
-  });
-
-  // 2. Send web push notifications to all user's subscribed devices
-  const subscriptions = await getUserSubscriptions(user.id);
-  console.log("sub", subscriptions); // Optional: for debugging
-  
-  const payload = { 
-    title: "New Notification", 
-    body: message, 
-    url: link 
-  };
-
-  // Send to each subscribed device
-  subscriptions.forEach(sub => sendPushNotification(sub.subscription, payload));
-
-  // 3. Send email notification
-  const html = `<p>${message}</p><p><a href="${link}">View</a></p>`;
-  await sendEmail(user.email, "New Notification", html);
-}
-
 async function getUserSubscriptions(userId) {
   return await prisma.subscription.findMany({
     where: { userId },
   });
+}
+
+// ─── Add these to notificationService.js ────────────────────────────────────
+//
+// Also REPLACE your existing notifyUser() with the version below —
+// it checks the user's saved preferences before sending each channel.
+
+// ==================== Preference Management ====================
+
+/**
+ * Fetch a user's notification preferences JSON blob
+ */
+async function fetchPreferences(userId) {
+  return await prisma.notificationPreference.findUnique({
+    where: { userId: Number(userId) },
+  });
+}
+
+/**
+ * Upsert a user's notification preferences
+ */
+async function savePreferences(userId, preferences) {
+  return await prisma.notificationPreference.upsert({
+    where: { userId: Number(userId) },
+    update: { preferences },
+    create: { userId: Number(userId), preferences },
+  });
+}
+
+// ==================== Preference-Aware notifyUser ====================
+
+/**
+ * Notify a user through multiple channels, respecting their preferences.
+ *
+ * @param {Object} user          - { id, username, email }
+ * @param {string} message       - Notification message text
+ * @param {string} link          - URL related to the notification
+ * @param {string} [notifKey]    - Preference key (e.g. "discovery_story_liked").
+ *                                  When omitted every channel fires (backward-compat).
+ */
+async function notifyUser(user, message, link, notifKey = null) {
+  // Resolve channel permissions from saved preferences
+  let allowInbox = true;
+  let allowPush  = true;
+  let allowEmail = true;
+
+  if (notifKey) {
+    try {
+      const record = await fetchPreferences(user.id);
+      if (record && record.preferences && record.preferences[notifKey]) {
+        const p = record.preferences[notifKey];
+        allowInbox = p.inbox  !== false;
+        allowPush  = p.push   !== false;
+        allowEmail = p.email  !== false;
+      }
+    } catch (err) {
+      // If preference lookup fails, default to sending everything
+      console.error("Preference lookup error:", err);
+    }
+  }
+
+  // 1. In-app inbox
+  if (allowInbox) {
+    await addNotification({
+      username: user.username,
+      message,
+      link,
+      userId: Number(user.id),
+    });
+  }
+
+  // 2. Web push
+  if (allowPush) {
+    const subscriptions = await getUserSubscriptions(user.id);
+    const payload = { title: "New Notification", body: message, url: link };
+    subscriptions.forEach((sub) => sendPushNotification(sub.subscription, payload));
+  }
+
+  // 3. Email
+  if (allowEmail) {
+    const baseUrl = process.env.ALLOWED_ORIGIN; // e.g. https://inkwell.com.ng or http://localhost:5173
+    const fullLink = `${baseUrl}${link}`;       // e.g. https://inkwell.com.ng/discovery/12
+    const html = `<p>${message}</p><p><a href="${fullLink}">View on Inkwell</a></p>`;
+    await sendEmail(user.email, "New Notification", html);
+  }
 }
 
 // ==================== Subscription Management ====================
@@ -167,6 +215,8 @@ async function markNotificationRead(userId) {
 
 module.exports = {
   notifyUser,
+  fetchPreferences,
+  savePreferences,
   saveSubscription,
   fetchNotifications,
   markNotificationRead

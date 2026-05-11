@@ -93,6 +93,7 @@ async function updateUser({
  */
 async function fetchUsers() {
   return await prisma.user.findMany({
+    where: { isDeleted: false },
     select: {
       id: true,
       username: true,
@@ -120,6 +121,7 @@ async function fetchUser(userId) {
       avatar: true,
       role: true,
       createdAt: true,
+      isDeleted: true,
     }
   });
 }
@@ -134,25 +136,75 @@ async function fetchUserWithPassword(userId) {
       email: true,
       password: true, // needed for password verification only
       role: true,
+      isDeleted: true,
     }
   });
 }
 
 /**
- * Delete a user by ID
- * @param {number} id - User ID to delete
- * @returns {Promise<Object>} Deleted user object
+ * Find a user by their email address.
+ * @param {string} email
+ * @returns {Promise<Object|null>}
+ */
+async function findUserByEmail(email) {
+  return await prisma.user.findUnique({
+    where: { email },
+    select: { id: true, email: true, isDeleted: true },
+  });
+}
+
+/**
+ * Soft-delete a user account (Reddit-style).
+ *
+ * What happens:
+ *  - Personal data is wiped: email, password, avatar, bio, dateOfBirth,
+ *    discordId, resetToken are all nulled out.
+ *  - username is replaced with "[deleted]" (with a unique suffix so the
+ *    @unique constraint keeps working).
+ *  - isDeleted is set to true and deletedAt records the timestamp.
+ *
+ * What is preserved:
+ *  - Comments, replies, feedback responses, paragraph comments on other
+ *    people's content — those rows still exist but their author FK is
+ *    set to NULL by the database (onDelete: SetNull in the schema).
+ *    The UI should render "[deleted]" wherever it sees a null author.
+ *
+ * What is hard-deleted by the DB (onDelete: Cascade):
+ *  - Projects, sprints, notes, todolists, notifications, their own
+ *    wall-received posts, likes, feedback submissions, etc. — anything
+ *    that is purely the user's private data.
+ *
+ * @param {number} userId
+ * @returns {Promise<Object>} The anonymised user row
  */
 async function deleteUser(userId) {
-  return await prisma.user.delete({
-    where: { id: userId }
+  // Use a timestamp suffix to keep the username unique even if someone later
+  // registers the original username (which would also be "[deleted]").
+  const anonymousUsername = `[deleted]_${userId}_${Date.now()}`;
+
+  return await prisma.user.update({
+    where: { id: userId },
+    data: {
+      isDeleted:        true,
+      deletedAt:        new Date(),
+      // Wipe all personal identifiers
+      username:         anonymousUsername,
+      email:            null,
+      password:         null,
+      discordId:        null,
+      avatar:           null,
+      bio:              null,
+      dateOfBirth:      null,
+      resetToken:       null,
+      resetTokenExpiry: null,
+    },
   });
 }
 
 
 async function fetchFoundingWriters() {
   return await prisma.user.findMany({
-    where: { role: "FOUNDING_WRITER" },
+    where: { role: "FOUNDING_WRITER", isDeleted: false },
     select: {
       id: true,
       username: true,
@@ -173,6 +225,7 @@ module.exports = {
   fetchUsers,
   fetchUser,
   fetchUserWithPassword,
+  findUserByEmail,
   deleteUser,
   fetchFoundingWriters,
 };

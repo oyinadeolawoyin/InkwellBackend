@@ -155,7 +155,7 @@ async function addComment(req, res) {
       snippetService.getUserById(snippet.userId).then((snippetAuthor) => {
         if (snippetAuthor) {
           const notifLink = `/snippets/${snippetId}`;
-          notifyUser(snippetAuthor, `${req.user.username} commented on your snippet.`, notifLink).catch(() => {});
+          notifyUser(snippetAuthor, `${req.user.username} commented on your snippet.`, notifLink, "snippet_comment").catch(() => {});
         }
       }).catch(() => {});
     }
@@ -180,7 +180,7 @@ async function toggleCommentLike(req, res) {
           const author = await snippetService.getUserById(comment.userId);
           if (author) {
             const notifLink = `/snippets/${comment.snippetId}`;
-            notifyUser(author, `${req.user.username} liked your comment.`, notifLink).catch(() => {});
+            notifyUser(author, `${req.user.username} liked your comment.`, notifLink, "snippet_comment_liked").catch(() => {});
           }
         }
       }).catch(() => {});
@@ -244,7 +244,7 @@ async function addReply(req, res) {
       snippetService.getUserById(comment.userId).then((commentAuthor) => {
         if (commentAuthor) {
           const notifLink = `/snippets/${comment.snippetId}`;
-          notifyUser(commentAuthor, `${req.user.username} replied to your comment.`, notifLink).catch(() => {});
+          notifyUser(commentAuthor, `${req.user.username} replied to your comment.`, notifLink, "snippet_reply").catch(() => {});
         }
       }).catch(() => {});
     }
@@ -270,7 +270,7 @@ async function toggleReplyLike(req, res) {
           if (author) {
             const comment = await snippetService.findComment(reply.commentId);
             const notifLink = comment ? `/snippets/${comment.snippetId}` : "/snippets";
-            notifyUser(author, `${req.user.username} liked your reply.`, notifLink).catch(() => {});
+            notifyUser(author, `${req.user.username} liked your reply.`, notifLink, "snippet_reply_liked").catch(() => {});
           }
         }
       }).catch(() => {});

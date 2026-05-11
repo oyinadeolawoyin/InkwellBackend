@@ -62,6 +62,45 @@ async function markRead(req, res) {
     }
 }
 
+/**
+ * Get notification preferences for the current user
+ * @route GET /notifications/preferences
+ */
+async function getPreferences(req, res) {
+    try {
+      const userId = req.user.id;
+      const record = await notificationsService.fetchPreferences(userId);
+      // Return stored JSON or null (frontend fills in defaults)
+      res.status(200).json({ preferences: record ? record.preferences : null });
+    } catch (error) {
+      console.error("Get notification preferences error:", error);
+      res.status(500).json({ message: "Failed to fetch preferences" });
+    }
+}
+  
+/**
+* Save notification preferences for the current user
+* @route POST /notifications/preferences
+* Body: { preferences: { [notifKey]: { inbox: bool, push: bool, email: bool } } }
+*/
+async function savePreferences(req, res) {
+    try {
+      const userId = req.user.id;
+      const { preferences } = req.body;
+  
+      if (!preferences || typeof preferences !== "object") {
+        return res.status(400).json({ message: "preferences object is required" });
+      }
+  
+      await notificationsService.savePreferences(userId, preferences);
+      res.status(200).json({ message: "Preferences saved successfully" });
+    } catch (error) {
+      console.error("Save notification preferences error:", error);
+      res.status(500).json({ message: "Failed to save preferences" });
+    }
+}
+
+
 // ============================================
 // EXPORTS
 // ============================================
@@ -69,5 +108,7 @@ async function markRead(req, res) {
 module.exports = {
     saveSubscription,
     getNotifications,
-    markRead
+    markRead,
+    savePreferences,
+    getPreferences
 };

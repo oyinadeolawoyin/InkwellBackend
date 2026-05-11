@@ -19,7 +19,6 @@ async function updateUser(req, res) {
       if (isNaN(dob.getTime())) {
         return res.status(400).json({ message: "Please enter a valid date of birth." });
       }
-      // Must be in the past and not unreasonably old
       const now = new Date();
       const minDob = new Date(now.getFullYear() - 120, 0, 1);
       if (dob >= now) {
@@ -95,11 +94,41 @@ async function fetchUser(req, res) {
   }
 }
 
+/**
+ * DELETE /users/me
+ *
+ * Soft-deletes the authenticated user's account:
+ *  1. Wipes all personal data on the User row (username → "[deleted]_id_ts",
+ *     email/password/avatar/bio/discordId all nulled).
+ *  2. All their content (projects, sprints, notes …) is hard-deleted by the DB
+ *     via onDelete: Cascade.
+ *  3. Comments / feedback they left on *other* people's content are preserved
+ *     with a null authorId — the UI shows "[deleted]" (Reddit-style).
+ *  4. The auth cookie is cleared so the client is immediately logged out.
+ *
+ * If the user had an avatar uploaded to object storage, it is deleted first.
+ */
 async function deleteUser(req, res) {
   const userId = req.user.id;
   try {
+    // Clean up avatar from object storage before wiping the row
+    const existingUser = await userService.fetchUser(Number(userId));
+    if (existingUser?.avatar) {
+      try {
+        await fileUploader.deleteFile(existingUser.avatar);
+      } catch (avatarErr) {
+        // Non-fatal — log and continue; the account is still deleted
+        console.error("Avatar cleanup error during account deletion:", avatarErr);
+      }
+    }
+
     await userService.deleteUser(Number(userId));
-    res.status(200).json({ message: "User deletion successful." });
+
+    // Clear the auth cookie so the browser is immediately logged out.
+    // Adjust the cookie name to whatever your JWT middleware uses.
+    res.clearCookie("token", { httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production" });
+
+    res.status(200).json({ message: "Your account has been deleted." });
   } catch (error) {
     console.error("Delete user error:", error);
     res.status(500).json({ message: error.message || "Something went wrong. Please try again." });

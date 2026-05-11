@@ -196,7 +196,7 @@ async function approveStory(req, res) {
       notifyUser(
         author,
         `Your story "${existing.title}" has been approved and is now live on the Discovery page!`,
-        `/discovery/${storyId}`
+        `/discovery/${storyId}`, "discovery_story_approved"
       );
     }
 
@@ -214,7 +214,7 @@ async function approveStory(req, res) {
         await Promise.allSettled(
           users
             .filter((u) => u.id !== existing.userId) // author already notified above
-            .map((u) => notifyUser(u, message, link))
+            .map((u) => notifyUser(u, message, link, "discovery_new_story"))
         );
       } catch (err) {
         console.error("Discovery approval broadcast error:", err);
@@ -274,7 +274,7 @@ async function toggleLike(req, res) {
           await notifyUser(
             author,
             `${liker.username} liked your story "${story.title}".`,
-            `/discovery/${storyId}`
+            `/discovery/${storyId}`, "discovery_story_liked"
           );
         } catch (err) {
           console.error("Like notification error:", err);

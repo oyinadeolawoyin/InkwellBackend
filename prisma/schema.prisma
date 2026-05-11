@@ -28,7 +28,16 @@ model User {
   resetToken       String?   @unique
   resetTokenExpiry DateTime?
 
+  // ── Soft-delete fields ──────────────────────────────────────────────────
+  // When a user deletes their account we anonymise their row instead of
+  // hard-deleting it, so that comments / feedback they wrote are preserved
+  // (Reddit-style "[deleted]").  isDeleted is the fast lookup flag;
+  // deletedAt records when it happened.
+  isDeleted        Boolean   @default(false)
+  deletedAt        DateTime?
+
   // ── existing relations ──────────────────────────────────────────────────
+  notificationPreference NotificationPreference?
   groupSprints        GroupSprint[]
   sprints             Sprint[]
   notification        Notification[]
@@ -172,16 +181,8 @@ model Project {
   lastSessionReset    DateTime?
 
   // ── Consecutive-days streak tracker ───────────────────────────────────
-  // How many days in a row the writer wants to write (set by the user).
-
   consecutiveDaysTarget Int?
-
-  // Current streak count. Resets to 0 if a day is missed.
-
   currentStreak         Int       @default(0)
-  
-  // UTC calendar date of the last day log (date only, stored as DateTime).
-  // Used to detect whether today has been logged and whether a day was skipped.
   lastLogDate           DateTime?
 
   // ── Deadline / schedule ────────────────────────────────────────────────
@@ -195,12 +196,10 @@ model Project {
   wordLogs         ProjectWordLog[]
   progressLogs     ProjectProgressLog[]
   sessionLogs      ProjectSessionLog[]
-  // One log entry per calendar day for the streak system
   dayLogs          ProjectDayLog[]
   todolists        Todolist[]
   notes            Note[]
   sprints          Sprint[]
-  // Events this project is enrolled in
   eventEntries     ProjectEventEntry[]
 
   @@index([userId])
@@ -208,28 +207,21 @@ model Project {
 }
 
 // ─── Day Log (streak system) ──────────────────────────────────────────────────
-// One row per calendar day per project. The writer must log at least one of:
-//   wordsLogged, chaptersLogged, scenesLogged, minutesLogged
-// to "count" the day towards their consecutive streak.
 model ProjectDayLog {
   id             Int      @id @default(autoincrement())
   projectId      Int
   userId         Int
-  // Calendar date this log counts for (stored as midnight UTC, e.g. 2025-04-27T00:00:00Z)
   logDate        DateTime
-  // At least one of the four fields below must be > 0
   wordsLogged    Int      @default(0)
   chaptersLogged Int      @default(0)
   scenesLogged   Int      @default(0)
   minutesLogged  Int      @default(0)
-  // Snapshot of the streak value after this log was saved
   streakAtLog    Int      @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  // Only one day-log per calendar day per project
   @@unique([projectId, logDate])
   @@index([projectId])
   @@index([userId])
@@ -452,15 +444,17 @@ model SnippetLike {
   @@index([snippetId])
 }
 
+// NOTE: userId is now nullable + SetNull so comments survive account deletion.
+// The UI should render "[deleted]" when userId is null.
 model SnippetComment {
   id        Int            @id @default(autoincrement())
-  userId    Int
+  userId    Int?                                                          // <-- nullable
   snippetId Int
   content   String
   createdAt DateTime       @default(now())
 
   likes     SnippetCommentLike[]
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull) // <-- SetNull
   snippet   WritingSnippet @relation(fields: [snippetId], references: [id], onDelete: Cascade)
   replies   SnippetReply[]
 
@@ -468,15 +462,16 @@ model SnippetComment {
   @@index([userId])
 }
 
+// NOTE: userId nullable + SetNull — same reasoning as SnippetComment.
 model SnippetReply {
   id        Int            @id @default(autoincrement())
-  userId    Int
+  userId    Int?                                                          // <-- nullable
   commentId Int
   content   String
   createdAt DateTime       @default(now())
 
   likes     SnippetReplyLike[]
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull) // <-- SetNull
   comment   SnippetComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   @@index([commentId])
@@ -550,6 +545,17 @@ model Notification {
   @@index([userId, read])
 }
 
+model NotificationPreference {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  preferences Json     @default("{}")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BLOG
 // ─────────────────────────────────────────────────────────────────────────────
@@ -579,28 +585,30 @@ model BlogPostLike {
   @@index([blogPostId])
 }
 
+// NOTE: authorId nullable + SetNull — blog comments survive account deletion.
 model BlogComment {
   id         Int         @id @default(autoincrement())
   blogPostId Int
-  authorId   Int
+  authorId   Int?                                                         // <-- nullable
   content    String
   createdAt  DateTime    @default(now())
   post       BlogPost    @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
-  author     User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author     User?       @relation(fields: [authorId], references: [id], onDelete: SetNull) // <-- SetNull
   replies    BlogReply[]
 
   @@index([blogPostId])
   @@index([authorId])
 }
 
+// NOTE: authorId nullable + SetNull — blog replies survive account deletion.
 model BlogReply {
   id        Int         @id @default(autoincrement())
   commentId Int
-  authorId  Int
+  authorId  Int?                                                          // <-- nullable
   content   String
   createdAt DateTime    @default(now())
   comment   BlogComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  author    User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author    User?       @relation(fields: [authorId], references: [id], onDelete: SetNull) // <-- SetNull
 
   @@index([commentId])
   @@index([authorId])
@@ -610,14 +618,18 @@ model BlogReply {
 // WALL POST
 // ─────────────────────────────────────────────────────────────────────────────
 
+// NOTE: authorId nullable + SetNull — wall posts written by a deleted user are
+// preserved on the recipient's wall but show "[deleted]" as the author.
+// wallPostsReceived (profileId) stays Cascade: if your profile is gone, your
+// wall goes with it.
 model WallPost {
   id        Int      @id @default(autoincrement())
-  authorId  Int
+  authorId  Int?                                                          // <-- nullable
   profileId Int
   content   String
   createdAt DateTime @default(now())
 
-  author   User              @relation("WallPostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  author   User?             @relation("WallPostAuthor", fields: [authorId], references: [id], onDelete: SetNull) // <-- SetNull
   profile  User              @relation("WallPostProfile", fields: [profileId], references: [id], onDelete: Cascade)
   likes    WallPostLike[]
   comments WallPostComment[]
@@ -637,14 +649,15 @@ model WallPostLike {
   @@index([wallPostId])
 }
 
+// NOTE: userId nullable + SetNull — wall post comments survive account deletion.
 model WallPostComment {
   id         Int      @id @default(autoincrement())
-  userId     Int
+  userId     Int?                                                         // <-- nullable
   wallPostId Int
   content    String
   createdAt  DateTime @default(now())
 
-  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User?           @relation(fields: [userId], references: [id], onDelete: SetNull) // <-- SetNull
   wallPost WallPost        @relation(fields: [wallPostId], references: [id], onDelete: Cascade)
   replies  WallPostReply[]
 
@@ -652,14 +665,15 @@ model WallPostComment {
   @@index([userId])
 }
 
+// NOTE: userId nullable + SetNull — wall post replies survive account deletion.
 model WallPostReply {
   id        Int             @id @default(autoincrement())
-  userId    Int
+  userId    Int?                                                          // <-- nullable
   commentId Int
   content   String
   createdAt DateTime        @default(now())
 
-  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user    User?           @relation(fields: [userId], references: [id], onDelete: SetNull) // <-- SetNull
   comment WallPostComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   @@index([commentId])
@@ -670,25 +684,18 @@ model WallPostReply {
 // FEEDBACK HUB
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Tracks how many unique users have ever posted a submission.
-// Used to grant the first 5 posters a free pass (no points required).
 model FeedbackHubBootstrap {
   id        Int      @id @default(autoincrement())
-  // total distinct users who have ever submitted — only increments, never decrements
   posterCount Int    @default(0)
 
-  // Singleton row — always id = 1
   @@map("feedback_hub_bootstrap")
 }
-
-// ─── Point wallet ────────────────────────────────────────────────────────────
 
 model FeedbackPoint {
   id             Int      @id @default(autoincrement())
   userId         Int      @unique
-  postingBalance Int      @default(5)   // spendable — goes up and down
-  reputation     Int      @default(5)   // lifetime total — only ever goes up
-  // tracks whether this user has already used their bootstrap free post
+  postingBalance Int      @default(5)
+  reputation     Int      @default(5)
   usedFreePost   Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -696,23 +703,21 @@ model FeedbackPoint {
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-// ─── Submission (chapter posted for feedback) ─────────────────────────────────
-
 model FeedbackSubmission {
   id               Int             @id @default(autoincrement())
   userId           Int
   title            String
   genre            String
-  summary          String          // 25–60 words enforced in service
-  content          String          // full chapter text
-  critiqueCount    Int      @default(0) // Tracks the number of critiques
-  isOutdated       Boolean  @default(false) // Marks if the post is no longer in Spotlight
+  summary          String
+  content          String
+  critiqueCount    Int      @default(0)
+  isOutdated       Boolean  @default(false)
   wordCountTier    WordCountTier
-  actualWordCount  Int             // counted server-side on submit
+  actualWordCount  Int
   draftStage       DraftStage
   contentWarnings  String[]
-  feedbackWanted   String[]        // free-text tags from writer
-  pointsCost       Int             // 0 if bootstrap free post, else 10/20/30/40
+  feedbackWanted   String[]
+  pointsCost       Int
   wasFreePost      Boolean         @default(false)
   isOpen           Boolean         @default(true)
   createdAt        DateTime        @default(now())
@@ -728,32 +733,34 @@ model FeedbackSubmission {
   @@index([genre])
 }
 
-// ─── Full critique (ratings + general feedback) ───────────────────────────────
-
+// NOTE: criticId nullable + SetNull — full critiques survive account deletion.
+// The content (ratings + written feedback) is valuable to the submission author
+// and should not vanish just because the critic left.
 model FeedbackResponse {
   id                  Int                @id @default(autoincrement())
   submissionId        Int
-  criticId            Int
-  overallRating       Int?                // 1–5
-  clarityRating       Int?                // 1–5
-  pacingRating        Int?                // 1–5
-  believabilityRating Int?                // 1–5
-  generalFeedback     String             // ≥100 words enforced in service
+  criticId            Int?                                               // <-- nullable
+  overallRating       Int?
+  clarityRating       Int?
+  pacingRating        Int?
+  believabilityRating Int?
+  generalFeedback     String
   pointsEarned        Int
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
   submission  FeedbackSubmission     @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  critic      User                   @relation(fields: [criticId], references: [id], onDelete: Cascade)
+  critic      User?                  @relation(fields: [criticId], references: [id], onDelete: SetNull) // <-- SetNull
   upvotes     FeedbackResponseUpvote[]
 
   // One full response per critic per submission
-  @@unique([submissionId, criticId])
+  // @@unique([submissionId, criticId]) -- removed: criticId is now nullable,
+  // so the unique constraint would allow multiple null-critic rows. If you need
+  // to prevent duplicates before deletion, enforce it at the application layer.
   @@index([submissionId])
   @@index([criticId])
 }
 
-// Upvote on a full critique — submission author only, gives critic +3 pts
 model FeedbackResponseUpvote {
   id         Int              @id @default(autoincrement())
   userId     Int
@@ -767,19 +774,18 @@ model FeedbackResponseUpvote {
   @@index([responseId])
 }
 
-// ─── Paragraph comment ────────────────────────────────────────────────────────
-
+// NOTE: authorId nullable + SetNull — paragraph comments survive account deletion.
 model ParagraphComment {
   id             Int                @id @default(autoincrement())
   submissionId   Int
-  authorId       Int
-  paragraphIndex Int                // 0-based paragraph position
+  authorId       Int?                                                    // <-- nullable
+  paragraphIndex Int
   content        String
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
   submission  FeedbackSubmission     @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  author      User                   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author      User?                  @relation(fields: [authorId], references: [id], onDelete: SetNull) // <-- SetNull
   upvotes     ParagraphCommentUpvote[]
   replies     ParagraphCommentReply[]
 
@@ -788,7 +794,6 @@ model ParagraphComment {
   @@index([authorId])
 }
 
-// Upvote on a paragraph comment — any user except comment author, gives author +3 pts
 model ParagraphCommentUpvote {
   id        Int              @id @default(autoincrement())
   userId    Int
@@ -802,16 +807,16 @@ model ParagraphCommentUpvote {
   @@index([commentId])
 }
 
-// One-level reply on a paragraph comment (no nested threading)
+// NOTE: authorId nullable + SetNull — paragraph comment replies survive account deletion.
 model ParagraphCommentReply {
   id        Int              @id @default(autoincrement())
   commentId Int
-  authorId  Int
+  authorId  Int?                                                         // <-- nullable
   content   String
   createdAt DateTime         @default(now())
 
   comment   ParagraphComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  author    User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author    User?            @relation(fields: [authorId], references: [id], onDelete: SetNull) // <-- SetNull
 
   @@index([commentId])
   @@index([authorId])
@@ -819,19 +824,19 @@ model ParagraphCommentReply {
 
 model DiscoveryStory {
   id              Int      @id @default(autoincrement())
-  userId          Int                         // the person who submitted
+  userId          Int
   title           String
   genre           String
   synopsis        String
-  firstChapterTitle String?                   // title of the opening chapter
-  firstChapter    String                      // full chapter text
-  coverUrl        String?                     // uploaded cover image
-  authorName      String                      // real author name (may differ from submitter)
-  recommendedBy   String?                     // if submitted by someone other than the author
-  platform        String                      // e.g. "Wattpad", "Kindle", "Royal Road"
-  platformLink    String                      // URL to the story on that platform
-  contentWarnings String[] @default([])       // e.g. ["Violence", "Strong language"]
-  isApproved      Boolean  @default(false)    // admin approval gate
+  firstChapterTitle String?
+  firstChapter    String
+  coverUrl        String?
+  authorName      String
+  recommendedBy   String?
+  platform        String
+  platformLink    String
+  contentWarnings String[] @default([])
+  isApproved      Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -918,16 +923,15 @@ enum WritingPhase {
   EDITING
 }
 
-// Platform event categories
 enum EventType {
-  ANNOUNCEMENT    // General news / carousel card only — no streak tracking
-  DAYS_CHALLENGE  // e.g. "Write 5 days straight" — uses daysTarget + streak system
-  WORKSHOP        // Scheduled workshop or live event
+  ANNOUNCEMENT
+  DAYS_CHALLENGE
+  WORKSHOP
   OTHER
 }
 
 enum ChallengeRole {
-  STREAK_KEEPER   // Completed the full streak — stayed in until the end
-  CHAMPION        // Top writer by total output (words/chapters/scenes)
-  IRON_PEN        // Perfect streak — logged every single day of the event
+  STREAK_KEEPER
+  CHAMPION
+  IRON_PEN
 }

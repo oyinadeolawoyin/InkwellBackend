@@ -6,5 +6,10 @@ const { authenticateJWT } = require("../config/jwt");
 router.get("/", authenticateJWT, notificationsController.getNotifications);
 router.post("/save-subscription", authenticateJWT, notificationsController.saveSubscription);
 router.post("/:userId/read", authenticateJWT, notificationsController.markRead);
+// Get user's notification preferences
+router.get("/preferences", authenticateJWT, notificationsController.getPreferences);
+ 
+// Save / update user's notification preferences
+router.post("/preferences", authenticateJWT, notificationsController.savePreferences);
 
 module.exports = router;

@@ -48,7 +48,7 @@ async function createSubmission(req, res) {
       .then((users) => {
         const message = `${submission.user.username} posted a new submission: "${submission.title}"`;
         const link    = `/feedback/${submission.id}`;
-        users.forEach((user) => notifyUser(user, message, link).catch(() => {}));
+        users.forEach((user) => notifyUser(user, message, link, "feedback_new_submission").catch(() => {}));
       })
       .catch(() => {});
 
@@ -191,7 +191,7 @@ async function createResponse(req, res) {
     if (submissionAuthor && submissionAuthor.id !== req.user.id) {
       const message = `${req.user.username ?? "Someone"} left a critique on your submission: "${submissionTitle ?? ""}"`;
       const link    = `/feedback/${req.params.id}#critique-${response.id}`;
-      notifyUser(submissionAuthor, message, link).catch(() => {});
+      notifyUser(submissionAuthor, message, link, "feedback_critique_received").catch(() => {});
     }
 
     res.status(201).json(responseData);
@@ -244,7 +244,7 @@ async function toggleResponseUpvote(req, res) {
             const oldTierName = pointsService.getTier(result.walletBefore.reputation).name;
             const message     = `Congratulations! You've been promoted from ${oldTierName} to ${newTier.name}!`;
             const link        = `/profile/${critic.username}`;
-            notifyUser(critic, message, link).catch(() => {});
+            notifyUser(critic, message, link, "feedback_critique_upvoted").catch(() => {});
           }).catch(() => {});
         }
       }
@@ -272,7 +272,7 @@ async function createParagraphComment(req, res) {
     if (submissionAuthor && submissionAuthor.id !== req.user.id) {
       const message = `${commenterName} commented on paragraph ${req.body.paragraphIndex + 1} of your submission: "${submissionTitle ?? ""}"`;
       const link    = `/feedback/${req.params.id}#paragraph-${req.body.paragraphIndex + 1}`;
-      notifyUser(submissionAuthor, message, link).catch(() => {});
+      notifyUser(submissionAuthor, message, link, "feedback_paragraph_comment").catch(() => {});
     }
 
     res.status(201).json(commentData);
@@ -353,7 +353,7 @@ async function toggleParagraphCommentUpvote(req, res) {
             const oldTierName = pointsService.getTier(result.walletBefore.reputation).name;
             const message     = `Congratulations! You've been promoted from ${oldTierName} to ${newTier.name}!`;
             const link        = `/profile/${commentAuthor.username}`;
-            notifyUser(commentAuthor, message, link).catch(() => {});
+            notifyUser(commentAuthor, message, link, "feedback_comment_milestone").catch(() => {});
           }).catch(() => {});
         }
       }
@@ -380,7 +380,7 @@ async function createParagraphCommentReply(req, res) {
       const paraLabel = typeof paragraphIndex === "number" ? ` on paragraph ${paragraphIndex + 1}` : "";
       const message = `${replierName} replied to your comment${paraLabel} in "${submissionTitle ?? "a submission"}"`;
       const link    = typeof paragraphIndex === "number" ? `/feedback/${submissionId}#paragraph-${paragraphIndex + 1}` : `/feedback/${submissionId}`;
-      notifyUser(commentAuthor, message, link).catch(() => {});
+      notifyUser(commentAuthor, message, link, "feedback_paragraph_reply").catch(() => {});
     }
 
     res.status(201).json(replyData);

@@ -26,7 +26,7 @@ async function createPost(req, res) {
       const link = `/blog/${post.id}`;
       const postTitle = post.title ? `"${post.title}"` : "a new blog post";
       users.forEach((user) =>
-        notifyUser(user, `A new blog post has been published: ${postTitle}`, link).catch(() => {})
+        notifyUser(user, `A new blog post has been published: ${postTitle}`, link, "blog_new_post").catch(() => {})
       );
     }).catch(() => {});
   } catch (error) {
@@ -152,7 +152,7 @@ async function addComment(req, res) {
     blogService.getAdminUsers().then((admins) => {
       const notifLink = `/blog/${postId}`;
       admins.forEach((admin) =>
-        notifyUser(admin, `${req.user.username} commented on a blog post.`, notifLink).catch(() => {})
+        notifyUser(admin, `${req.user.username} commented on a blog post.`, notifLink, "blog_comment").catch(() => {})
       );
     }).catch(() => {});
   } catch (error) {
@@ -214,7 +214,7 @@ async function addReply(req, res) {
       blogService.getUserById(comment.authorId).then((commentAuthor) => {
         if (commentAuthor) {
           const notifLink = `/blog/${comment.blogPostId}`;
-          notifyUser(commentAuthor, `${req.user.username} replied to your comment.`, notifLink).catch(() => {});
+          notifyUser(commentAuthor, `${req.user.username} replied to your comment.`, notifLink, "blog_reply").catch(() => {});
         }
       }).catch(() => {});
     }

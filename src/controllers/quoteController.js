@@ -33,7 +33,7 @@ async function createQuote(req, res) {
 
       // Send notifications in background
       users.forEach(user => {
-        notifyUser(user, message, link).catch(err => {
+        notifyUser(user, message, link, "quote_new").catch(err => {
           console.error(`Failed to notify user ${user.id}:`, err);
         });
       });

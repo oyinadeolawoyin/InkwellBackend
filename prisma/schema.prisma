@@ -44,7 +44,6 @@ model User {
   projects            Project[]
   todolists           Todolist[]
   notes               Note[]
-  quoteLikes          QuoteLike[]
   blogPostLikes       BlogPostLike[]
   blogComments        BlogComment[]
   blogReplies         BlogReply[]
@@ -75,6 +74,11 @@ model User {
 
   // ── event winners ───────────────────────────────────────────────────────
   eventWins                   EventWinner[]
+
+  // ── emotion relations ────────────────────────────────────────────────────
+  emotionLikes                EmotionLike[]
+  emotionComments             EmotionComment[]
+  emotionCommentLikes         EmotionCommentLike[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -504,24 +508,6 @@ model SnippetReplyLike {
 // QUOTES, SUBSCRIPTIONS, NOTIFICATIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
-model Quote {
-  id        Int         @id @default(autoincrement())
-  title     String?
-  content   String
-  createdAt DateTime    @default(now())
-  likes     QuoteLike[]
-}
-
-model QuoteLike {
-  id      Int   @id @default(autoincrement())
-  userId  Int
-  quoteId Int
-  user    User  @relation(fields: [userId], references: [id])
-  quote   Quote @relation(fields: [quoteId], references: [id])
-
-  @@unique([userId, quoteId])
-}
-
 model Subscription {
   id           Int      @id @default(autoincrement())
   userId       Int
@@ -860,6 +846,74 @@ model DiscoveryLike {
 
   @@unique([userId, storyId])
   @@index([storyId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CRAFT LEARNING — Emotion Thesaurus daily feature
+// ─────────────────────────────────────────────────────────────────────────────
+
+model EmotionEntry {
+  id          Int      @id @default(autoincrement())
+  emotion     String   // e.g. "Anxiety"
+  cues        String[] // physical signal phrases
+  scheduledAt DateTime @unique // which day this emotion is shown
+  createdAt   DateTime @default(now())
+
+  likes       EmotionLike[]
+  comments    EmotionComment[]
+
+  @@index([scheduledAt])
+}
+
+model EmotionTemplate {
+  id        Int      @id @default(autoincrement())
+  emotion   String
+  cues      String[]
+  sortOrder Int      @unique  // 1, 2, 3 … determines the cycle order
+
+  @@index([sortOrder])
+}
+
+model EmotionLike {
+  id      Int          @id @default(autoincrement())
+  userId  Int
+  entryId Int
+  createdAt DateTime   @default(now())
+
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entry   EmotionEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, entryId])
+  @@index([entryId])
+}
+
+model EmotionComment {
+  id        Int          @id @default(autoincrement())
+  entryId   Int
+  authorId  Int?
+  content   String
+  isPinned  Boolean      @default(false)
+  createdAt DateTime     @default(now())
+
+  entry   EmotionEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  author  User?        @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  likes   EmotionCommentLike[]
+
+  @@index([entryId])
+  @@index([authorId])
+}
+
+model EmotionCommentLike {
+  id        Int            @id @default(autoincrement())
+  userId    Int
+  commentId Int
+  createdAt DateTime       @default(now())
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment EmotionComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, commentId])
+  @@index([commentId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

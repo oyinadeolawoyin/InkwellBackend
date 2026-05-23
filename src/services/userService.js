@@ -216,6 +216,91 @@ async function fetchFoundingWriters() {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ADD THESE FUNCTIONS TO userService.js
+// Place them in their own section, e.g. after deleteUser()
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ==================== Block Operations ====================
+
+/**
+ * Block a user.
+ * @param {number} blockerId  - The authenticated user doing the blocking.
+ * @param {number} blockedId  - The profile owner being blocked.
+ */
+async function blockUser(blockerId, blockedId) {
+  if (blockerId === blockedId) {
+    throw new Error("You cannot block yourself.");
+  }
+
+  const target = await prisma.user.findUnique({
+    where:  { id: blockedId },
+    select: { id: true, isDeleted: true },
+  });
+  if (!target || target.isDeleted) throw new Error("User not found.");
+
+  // upsert so a double-tap never throws a unique-constraint error
+  return prisma.userBlock.upsert({
+    where:  { blockerId_blockedId: { blockerId, blockedId } },
+    create: { blockerId, blockedId },
+    update: {},                          // already blocked — no-op
+  });
+}
+
+/**
+ * Unblock a user.
+ * @param {number} blockerId
+ * @param {number} blockedId
+ */
+async function unblockUser(blockerId, blockedId) {
+  const record = await prisma.userBlock.findUnique({
+    where: { blockerId_blockedId: { blockerId, blockedId } },
+  });
+  if (!record) throw new Error("Block not found.");
+
+  await prisma.userBlock.delete({
+    where: { blockerId_blockedId: { blockerId, blockedId } },
+  });
+
+  return { unblocked: true };
+}
+
+/**
+ * Return the list of users the authenticated user has blocked.
+ * @param {number} blockerId
+ */
+async function getBlockedUsers(blockerId) {
+  const blocks = await prisma.userBlock.findMany({
+    where:   { blockerId },
+    include: {
+      blocked: { select: { id: true, username: true, avatar: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return blocks.map((b) => b.blocked);
+}
+
+/**
+ * Check whether `potentialBlockerId` has blocked `potentialBlockedId`.
+ * Used internally by feedbackService before creating a response or comment.
+ * @param {number} potentialBlockerId
+ * @param {number} potentialBlockedId
+ * @returns {Promise<boolean>}
+ */
+async function isBlocked(potentialBlockerId, potentialBlockedId) {
+  const record = await prisma.userBlock.findUnique({
+    where: {
+      blockerId_blockedId: {
+        blockerId: potentialBlockerId,
+        blockedId: potentialBlockedId,
+      },
+    },
+  });
+  return Boolean(record);
+}
+
+
 // ==================== Exports ====================
 
 module.exports = {
@@ -228,4 +313,8 @@ module.exports = {
   findUserByEmail,
   deleteUser,
   fetchFoundingWriters,
+  blockUser,
+  unblockUser,
+  getBlockedUsers,
+  isBlocked,
 };

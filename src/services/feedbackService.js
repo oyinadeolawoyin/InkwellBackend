@@ -1,6 +1,7 @@
 // src/services/feedbackService.js
 const prisma               = require("../config/prismaClient");
 const pointsService        = require("./pointService");
+const { isBlocked }        = require("./userService");
 
 // ─── WORD COUNT HELPERS ───────────────────────────────────────────────────────
 
@@ -370,7 +371,13 @@ async function createResponse(criticId, submissionId, data) {
 
   if (!submission)                    throw new Error("Submission not found.");
   if (!submission.isOpen && !submission.isOutdated) throw new Error("This submission is no longer accepting feedback.");
-  if (submission.userId === criticId) throw new Error("You cannot critique your own work.")
+  if (submission.userId === criticId) throw new Error("You cannot critique your own work.");
+
+  // Block check: submission author has blocked this critic, or critic has blocked author
+  const blockedByAuthor = await isBlocked(submission.userId, criticId);
+  if (blockedByAuthor) throw new Error("You cannot critique this submission.");
+  const blockedAuthor = await isBlocked(criticId, submission.userId);
+  if (blockedAuthor) throw new Error("You cannot critique a submission from someone you have blocked.");
 
   // 1. CALCULATE POINTS (Full points for Spotlight, Half for Outdated)
   const pointsAwarded = pointsService.calculateCritiquePoints(submission.wordCountTier, submission.isOutdated);
@@ -495,6 +502,14 @@ async function createParagraphComment(authorId, submissionId, data) {
   });
   if (!submission)        throw new Error("Submission not found.");
   if (!submission.isOpen) throw new Error("This submission is no longer accepting feedback.");
+
+  // Block check: submission author has blocked this commenter, or commenter has blocked author
+  if (submission.user.id !== authorId) {
+    const blockedByAuthor = await isBlocked(submission.user.id, authorId);
+    if (blockedByAuthor) throw new Error("You cannot comment on this submission.");
+    const blockedAuthor = await isBlocked(authorId, submission.user.id);
+    if (blockedAuthor) throw new Error("You cannot comment on a submission from someone you have blocked.");
+  }
 
   const commenter = await prisma.user.findUnique({
     where:  { id: authorId },

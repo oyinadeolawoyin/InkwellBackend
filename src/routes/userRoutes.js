@@ -5,13 +5,11 @@ const { authenticateJWT } = require("../config/jwt");
 const upload = require("../config/multer");
 
 router.get("/founding-writers", userController.fetchFoundingWriters);
-// router.get("/", authenticateJWT, userController.fetchUsers);
+router.get("/blocked", authenticateJWT, userController.getBlockedUsers);         
 router.get("/:userId/user", authenticateJWT, userController.fetchUser);
 router.post("/updateUser", authenticateJWT, upload.single("avatar"), userController.updateUser);
-
-// Account deletion — soft-deletes the authenticated user's row.
-// Personal data is wiped; comments/feedback they left on others' content
-// are preserved with a null author (shown as "[deleted]" in the UI).
 router.delete("/me", authenticateJWT, userController.deleteUser);
+router.post("/:userId/block", authenticateJWT, userController.blockUser);        
+router.delete("/:userId/block", authenticateJWT, userController.unblockUser);    
 
 module.exports = router;

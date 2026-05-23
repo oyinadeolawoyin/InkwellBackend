@@ -145,10 +145,65 @@ async function fetchFoundingWriters(req, res) {
   }
 }
 
+/**
+ * POST /users/:userId/block
+ * Block another writer. The authenticated user is the blocker.
+ */
+async function blockUser(req, res) {
+  const blockerId = Number(req.user.id);
+  const blockedId = Number(req.params.userId);
+
+  try {
+    await userService.blockUser(blockerId, blockedId);
+    res.status(200).json({ blocked: true });
+  } catch (error) {
+    console.error("Block user error:", error);
+    const status = error.message === "User not found." ? 404 : 400;
+    res.status(status).json({ message: error.message || "Something went wrong. Please try again." });
+  }
+}
+
+/**
+ * DELETE /users/:userId/block
+ * Unblock a writer the authenticated user previously blocked.
+ */
+async function unblockUser(req, res) {
+  const blockerId = Number(req.user.id);
+  const blockedId = Number(req.params.userId);
+
+  try {
+    await userService.unblockUser(blockerId, blockedId);
+    res.status(200).json({ unblocked: true });
+  } catch (error) {
+    console.error("Unblock user error:", error);
+    const status = error.message === "Block not found." ? 404 : 400;
+    res.status(status).json({ message: error.message || "Something went wrong. Please try again." });
+  }
+}
+
+/**
+ * GET /users/blocked
+ * Returns the list of users the authenticated user has blocked.
+ */
+async function getBlockedUsers(req, res) {
+  const blockerId = Number(req.user.id);
+
+  try {
+    const users = await userService.getBlockedUsers(blockerId);
+    res.status(200).json({ users });
+  } catch (error) {
+    console.error("Get blocked users error:", error);
+    res.status(500).json({ message: error.message || "Something went wrong. Please try again." });
+  }
+}
+
 module.exports = {
   updateUser,
   // fetchUsers,
   fetchUser,
   deleteUser,
   fetchFoundingWriters,
+  blockUser,
+  unblockUser,
+  getBlockedUsers,
 };

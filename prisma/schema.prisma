@@ -27,12 +27,7 @@ model User {
   timezone         String    @default("UTC")
   resetToken       String?   @unique
   resetTokenExpiry DateTime?
-
-  // ── Soft-delete fields ──────────────────────────────────────────────────
-  // When a user deletes their account we anonymise their row instead of
-  // hard-deleting it, so that comments / feedback they wrote are preserved
-  // (Reddit-style "[deleted]").  isDeleted is the fast lookup flag;
-  // deletedAt records when it happened.
+  
   isDeleted        Boolean   @default(false)
   deletedAt        DateTime?
 
@@ -79,6 +74,23 @@ model User {
   emotionLikes                EmotionLike[]
   emotionComments             EmotionComment[]
   emotionCommentLikes         EmotionCommentLike[]
+
+  blocksMade      UserBlock[]  @relation("BlocksMade")
+  blocksReceived  UserBlock[]  @relation("BlocksReceived")
+}
+
+model UserBlock {
+  id        Int      @id @default(autoincrement())
+  blockerId Int                          // the user who did the blocking
+  blockedId Int                          // the user who was blocked
+  createdAt DateTime @default(now())
+
+  blocker   User     @relation("BlocksMade",     fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("BlocksReceived", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])       // can't block the same person twice
+  @@index([blockerId])
+  @@index([blockedId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

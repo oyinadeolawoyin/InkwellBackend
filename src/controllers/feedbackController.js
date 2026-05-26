@@ -166,9 +166,10 @@ async function getSpotlight(req, res) {
 
 async function getArchive(req, res) {
   try {
-    const { page = 1, genre } = req.query;
+    const { page = 1, limit = 9 , genre } = req.query;
     const result = await feedbackService.getOutdatedSubmissions({
       page: Number(page),
+      limit: Math.min(Number(limit), 50),
       genre: genre || undefined,
     });
     res.json(result);

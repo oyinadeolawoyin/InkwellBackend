@@ -166,9 +166,21 @@ async function getSpotlight(req, res) {
 
 async function getArchive(req, res) {
   try {
-    const { page = 1 } = req.query;
-    const result = await feedbackService.getOutdatedSubmissions({ page: Number(page) });
+    const { page = 1, genre } = req.query;
+    const result = await feedbackService.getOutdatedSubmissions({
+      page: Number(page),
+      genre: genre || undefined,
+    });
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+}
+
+async function getArchiveGenres(req, res) {
+  try {
+    const genres = await feedbackService.getArchiveGenres();
+    res.json(genres);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -428,6 +440,7 @@ module.exports = {
   deleteSubmission,
   getSpotlight,
   getArchive,
+  getArchiveGenres,
   createResponse,
   updateResponse,
   toggleResponseUpvote,

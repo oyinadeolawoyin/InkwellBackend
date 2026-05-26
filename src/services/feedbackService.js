@@ -109,6 +109,22 @@ async function createSubmission(userId, data) {
     throw new Error("Please add at least one specific feedback request.");
   }
 
+  // One-spotlight-at-a-time rule: block if user already has an active spotlight post
+  const existingSpotlight = await prisma.feedbackSubmission.findFirst({
+    where: {
+      userId,
+      isOutdated: false,
+      isOpen: true,
+      critiqueCount: { lt: 3 },
+    },
+    select: { id: true, title: true },
+  });
+  if (existingSpotlight) {
+    throw new Error(
+    `You already have a chapter in the spotlight: "${existingSpotlight.title}". It needs to receive 3 critiques and move to the archive before you can post again.`
+    );
+  }
+
   const actualWordCount = validateChapterWordCount(content, wordCountTier);
   const cost            = pointsService.getTierCost(wordCountTier);
 
@@ -320,9 +336,10 @@ async function updateSubmission(submissionId, userId, data) {
   });
 }
 
-// 1. Fetch the Spotlight (Top 6 oldest that need critiques)
+// 1. Fetch the Spotlight (Top 6 oldest that need critiques, one per user)
 async function getSpotlightSubmissions() {
-  return await prisma.feedbackSubmission.findMany({
+  // Fetch more than needed so we have room to deduplicate per user
+  const candidates = await prisma.feedbackSubmission.findMany({
     where: {
       isOutdated: false,
       isOpen: true,
@@ -330,25 +347,62 @@ async function getSpotlightSubmissions() {
     },
     include: submissionMeta,
     orderBy: { createdAt: 'asc' }, // Oldest first to move the queue
-    take: 6
   });
+
+  // Keep only the single oldest submission per user
+  const seen = new Set();
+  const deduped = [];
+  for (const sub of candidates) {
+    if (!seen.has(sub.userId)) {
+      seen.add(sub.userId);
+      deduped.push(sub);
+    }
+    if (deduped.length === 6) break;
+  }
+
+  return deduped;
 }
 
-// 2. Fetch Outdated (Archive)
-async function getOutdatedSubmissions({ page = 1, limit = 10 }) {
+// 2. Fetch Outdated (Archive) — supports optional genre filter
+async function getOutdatedSubmissions({ page = 1, limit = 10, genre } = {}) {
   const skip = (page - 1) * limit;
-  return await prisma.feedbackSubmission.findMany({
-    where: {
-      OR: [
-        { isOutdated: true },
-        { critiqueCount: { gte: 3 } }
-      ]
-    },
-    include: submissionMeta,
-    orderBy: { createdAt: 'desc' },
-    skip,
-    take: limit
+  const baseWhere = {
+    OR: [
+      { isOutdated: true },
+      { critiqueCount: { gte: 3 } }
+    ]
+  };
+  const where = genre ? { AND: [baseWhere, { genre }] } : baseWhere;
+
+  const [items, total] = await Promise.all([
+    prisma.feedbackSubmission.findMany({
+      where,
+      include: submissionMeta,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    prisma.feedbackSubmission.count({ where }),
+  ]);
+
+  return { items, total, page, pages: Math.ceil(total / limit) };
+}
+
+// 3. Get distinct genres present in the archive (for filter tabs)
+async function getArchiveGenres() {
+  const baseWhere = {
+    OR: [
+      { isOutdated: true },
+      { critiqueCount: { gte: 3 } }
+    ]
+  };
+  const rows = await prisma.feedbackSubmission.findMany({
+    where: baseWhere,
+    select: { genre: true },
+    distinct: ['genre'],
+    orderBy: { genre: 'asc' },
   });
+  return rows.map(r => r.genre).filter(Boolean);
 }
 
 // ─── FEEDBACK RESPONSES ──────────────────────────────────────────────────────
@@ -722,6 +776,7 @@ module.exports = {
   updateSubmission,
   getSpotlightSubmissions,
   getOutdatedSubmissions,
+  getArchiveGenres,
   createResponse,
   updateResponse,
   toggleResponseUpvote,

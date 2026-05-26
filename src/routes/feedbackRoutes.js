@@ -10,6 +10,7 @@ const { authenticateJWT } = require("../config/jwt");
 // Add these two new lines below:
 router.get("/submissions/spotlight",  ctrl.getSpotlight);
 router.get("/submissions/outdated", ctrl.getArchive);
+router.get("/submissions/outdated/genres", ctrl.getArchiveGenres);
 
 router.get("/points/me", authenticateJWT, ctrl.getMyWallet);
 router.get("/points/:userId",  authenticateJWT, ctrl.getUserWallet);

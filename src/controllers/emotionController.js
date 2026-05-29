@@ -1,6 +1,7 @@
 // src/controllers/emotionController.js
 const emotionService = require("../services/emotionService");
 const { publishDailyEmotion } = require("../../jobs/emotioncron.job");
+const { embedLength } = require("discord.js");
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -10,6 +11,24 @@ function errStatus(msg) {
   if (msg.includes("already commented"))                       return 409;
   if (msg.includes("at least") || msg.includes("characters")) return 422;
   return 400;
+}
+
+// ─── GET ALL EMOTIONS ──────────────────────────────
+
+async function getAllEmotions(req, res) {
+  try {
+    const emotions = await emotionService.getAllEmotions();
+
+    console.log("emotions count:", emotions.length);
+
+    return res.status(200).json({ emotions });
+  } catch (err) {
+    console.error("getAllEmotions error:", err);
+
+    return res.status(500).json({
+      message: "Failed to fetch emotions",
+    });
+  }
 }
 
 // ─── GET TODAY'S ENTRY (public) ───────────────────────────────────────────────
@@ -147,6 +166,7 @@ async function pinComment(req, res) {
 }
 
 module.exports = {
+  getAllEmotions,
   getTodayEntry,
   getEntryComments,
   publishToday,

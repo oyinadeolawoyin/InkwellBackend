@@ -5,6 +5,8 @@ const ctrl    = require("../controllers/emotionController");
 
 const { authenticateJWT } = require("../config/jwt");
 
+router.get("/", ctrl.getAllEmotions);
+
 // ─── TODAY'S ENTRY ────────────────────────────────────────────────────────────
 
 // Fully public — returns entry shape + counts only (no user flags, no comments)

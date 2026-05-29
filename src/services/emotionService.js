@@ -14,6 +14,27 @@ function todayUTC() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
+/**
+ * Fetch all unique emotions from EmotionTemplate
+ * (this is your canonical emotion list for sidebar)
+ */
+async function getAllEmotions() {
+  const emotions = await prisma.emotionTemplate.findMany({
+    orderBy: { sortOrder: "asc" },
+  });
+
+  if (!emotions || emotions.length === 0) {
+    throw new Error("No emotions found.");
+  }
+
+  return emotions.map((e) => ({
+    id: e.id,
+    emotion: e.emotion,
+    cues: e.cues,
+    sortOrder: e.sortOrder,
+  }));
+}
+
 // ─── TODAY'S ENTRY (public) ───────────────────────────────────────────────────
 
 /**
@@ -274,6 +295,7 @@ async function pinComment(commentId) {
 }
 
 module.exports = {
+  getAllEmotions,
   getTodayEntry,
   getEntryComments,
   toggleLike,

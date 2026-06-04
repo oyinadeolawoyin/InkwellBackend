@@ -163,34 +163,18 @@ async function postComment(userId, entryId, content) {
     );
   }
 
-  // Create comment + award point in a transaction so they succeed or fail together
-  const { comment, pointAwarded } = await prisma.$transaction(async (tx) => {
-    const comment = await tx.emotionComment.create({
-      data: { entryId, authorId: userId, content: content.trim() },
-      include: {
-        author: { select: { id: true, username: true, avatar: true } },
-        likes:  true,
-      },
-    });
-
-    await tx.feedbackPoint.upsert({
-      where:  { userId },
-      update: { postingBalance: { increment: COMMENT_POINT_REWARD } },
-      create: {
-        userId,
-        postingBalance: 5 + COMMENT_POINT_REWARD,
-        reputation:     0,
-      },
-    });
-
-    return { comment, pointAwarded: true };
+  // Create comment — no point reward for emotion practice sentences
+  const comment = await prisma.emotionComment.create({
+    data: { entryId, authorId: userId, content: content.trim() },
+    include: {
+      author: { select: { id: true, username: true, avatar: true } },
+      likes:  true,
+    },
   });
 
   return {
-    pointAwarded,
-    pointMessage: pointAwarded
-      ? `You earned ${COMMENT_POINT_REWARD} posting point for sharing your practice sentence!`
-      : null,
+    pointAwarded: false,
+    pointMessage: null,
     comment: {
       id:           comment.id,
       content:      comment.content,

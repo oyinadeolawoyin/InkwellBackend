@@ -1,0 +1,315 @@
+const draftService        = require("../services/draftservice");
+const feedbackService     = require("../services/feedbackService");
+const { notifyUser }      = require("../services/notificationService");
+
+// ─── CREATE ───────────────────────────────────────────────────────────────────
+
+/**
+ * POST /drafts
+ * Create a blank draft manually (or from sprint write editor on first open).
+ */
+async function createDraft(req, res) {
+  const userId = Number(req.user.id);
+  const { title, content } = req.body;
+
+  try {
+    const draft = await draftService.createDraft(userId, { title, content });
+    res.status(201).json({ draft });
+  } catch (error) {
+    console.error("Create draft error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── READ ─────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /drafts
+ * Get all drafts for the logged-in writer (draft list page).
+ */
+async function getUserDrafts(req, res) {
+  const userId = Number(req.user.id);
+  const page   = Number(req.query.page)  || 1;
+  const limit  = Number(req.query.limit) || 20;
+
+  try {
+    const result = await draftService.getUserDrafts(userId, { page, limit });
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Get drafts error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+/**
+ * GET /drafts/sprint-picker
+ * Lightweight list for the sprint modal "pick a draft" flow.
+ */
+async function getDraftsForSprintPicker(req, res) {
+  const userId = Number(req.user.id);
+
+  try {
+    const drafts = await draftService.getDraftsForSprintPicker(userId);
+    res.status(200).json({ drafts });
+  } catch (error) {
+    console.error("Sprint picker drafts error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+/**
+ * GET /drafts/:draftId
+ * Get a single draft with full source submission comments (editor view).
+ */
+async function getDraftById(req, res) {
+  const userId  = Number(req.user.id);
+  const draftId = Number(req.params.draftId);
+
+  try {
+    const draft = await draftService.getDraftById(draftId, userId);
+    res.status(200).json({ draft });
+  } catch (error) {
+    if (error.message === "Draft not found.") {
+      return res.status(404).json({ message: error.message });
+    }
+    console.error("Get draft error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── UPDATE ───────────────────────────────────────────────────────────────────
+
+/**
+ * PATCH /drafts/:draftId
+ * Save or auto-save draft content.
+ */
+async function updateDraft(req, res) {
+  const userId  = Number(req.user.id);
+  const draftId = Number(req.params.draftId);
+  const { title, content } = req.body;
+
+  try {
+    const draft = await draftService.updateDraft(draftId, userId, { title, content });
+    res.status(200).json({ draft });
+  } catch (error) {
+    if (error.message === "Draft not found.") {
+      return res.status(404).json({ message: error.message });
+    }
+    console.error("Update draft error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── DELETE ───────────────────────────────────────────────────────────────────
+
+/**
+ * DELETE /drafts/:draftId
+ * Delete a draft. Linked submission (if any) stays hidden but is not deleted.
+ */
+async function deleteDraft(req, res) {
+  const userId  = Number(req.user.id);
+  const draftId = Number(req.params.draftId);
+
+  try {
+    await draftService.deleteDraft(draftId, userId);
+    res.status(200).json({ deleted: true });
+  } catch (error) {
+    if (error.message === "Draft not found.") {
+      return res.status(404).json({ message: error.message });
+    }
+    console.error("Delete draft error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── UNPUBLISH SUBMISSION → DRAFT ─────────────────────────────────────────────
+
+/**
+ * POST /drafts/unpublish/:submissionId
+ * Unpublish a live critique submission and move it to the draft page.
+ * All critiques and paragraph comments are preserved on the submission record.
+ */
+async function unpublishSubmission(req, res) {
+  const userId       = Number(req.user.id);
+  const submissionId = Number(req.params.submissionId);
+
+  try {
+    const draft = await draftService.unpublishSubmission(submissionId, userId);
+    res.status(200).json({ draft, message: "Chapter moved to your drafts." });
+  } catch (error) {
+    if (
+      error.message === "Submission not found." ||
+      error.message === "Submission is already unpublished."
+    ) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error("Unpublish submission error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── REPUBLISH DRAFT → CRITIQUE HUB ──────────────────────────────────────────
+
+/**
+ * POST /drafts/:draftId/republish
+ * Republish a draft that was previously unpublished from the critique hub.
+ * Syncs edited content back to the submission and makes it live again.
+ */
+async function republishDraft(req, res) {
+  const userId  = Number(req.user.id);
+  const draftId = Number(req.params.draftId);
+
+  try {
+    const result = await draftService.republishDraft(draftId, userId);
+
+    // Notify the writer their chapter is live again
+    await notifyUser(
+      req.user,
+      "Your chapter is back in the Critique Hub. Writers can now read and critique it 🌱",
+      `/feedback/${result.submissionId}`,
+      "submission_republished"
+    );
+
+    res.status(200).json(result);
+  } catch (error) {
+    if (
+      error.message === "Draft not found." ||
+      error.message === "This draft has no linked submission to republish." ||
+      error.message.startsWith("You already have a chapter in the spotlight")
+    ) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error("Republish draft error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── POST DRAFT TO FEEDBACK HUB (fresh draft → new submission) ───────────────
+
+/**
+ * POST /drafts/:draftId/post-to-hub
+ * Convert a fresh draft (not previously published) into a new FeedbackSubmission.
+ *
+ * Flow:
+ * 1. Validate the draft belongs to this user and has no linked submission.
+ * 2. Pass draft content + writer's submission metadata to feedbackService.createSubmission.
+ * 3. On success, delete the draft.
+ *
+ * The writer fills in genre, summary, draftStage, feedbackWanted, wordCountTier
+ * in the submission form on the frontend — those come in req.body.
+ */
+async function postDraftToHub(req, res) {
+  const userId  = Number(req.user.id);
+  const draftId = Number(req.params.draftId);
+
+  const {
+    genre,
+    summary,
+    draftStage,
+    wordCountTier,
+    contentWarnings = [],
+    feedbackWanted  = [],
+  } = req.body;
+
+  try {
+    // 1. Fetch and validate the draft
+    const draft = await draftService.getDraftForPosting(draftId, userId);
+
+    if (!draft.title?.trim()) {
+      return res.status(400).json({ message: "Please add a title to your draft before posting." });
+    }
+    if (!draft.content?.trim()) {
+      return res.status(400).json({ message: "Your draft is empty. Write something first." });
+    }
+
+    // 2. Create the submission (handles points, validation, spotlight rule)
+    const submission = await feedbackService.createSubmission(userId, {
+      title:          draft.title,
+      genre,
+      summary,
+      content:        draft.content,
+      wordCountTier,
+      draftStage,
+      contentWarnings,
+      feedbackWanted,
+    });
+
+    // 3. Delete the draft — it's now a live submission
+    await draftService.deleteDraft(draftId, userId);
+
+    // Notify all other users a new chapter is up (mirrors feedbackController pattern)
+    const allUsers = await feedbackService.getAllUsersExcept(userId);
+    await Promise.allSettled(
+      allUsers.map((u) =>
+        notifyUser(
+          u,
+          `A new chapter is in the Critique Hub: "${submission.title}"`,
+          `/feedback/${submission.id}`,
+          "new_submission"
+        )
+      )
+    );
+
+    res.status(201).json({ submission });
+  } catch (error) {
+    if (
+      error.message.startsWith("You already have a chapter") ||
+      error.message.startsWith("Summary must be") ||
+      error.message.startsWith("Please add at least") ||
+      error.message.startsWith("Your chapter is") ||
+      error.message === "Draft not found." ||
+      error.message.startsWith("This draft is linked")
+    ) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error("Post draft to hub error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── SPRINT AUTO-SAVE ─────────────────────────────────────────────────────────
+
+/**
+ * POST /drafts/sprint-save
+ * Called automatically when a sprint ends and the writer used the Inkwell editor.
+ * Creates a new draft or updates an existing one.
+ * Body: { draftId?, title?, content }
+ */
+async function sprintAutoSave(req, res) {
+  const userId = Number(req.user.id);
+  const { draftId, title, content } = req.body;
+
+  if (!content && content !== "") {
+    return res.status(400).json({ message: "Content is required for auto-save." });
+  }
+
+  try {
+    const draft = await draftService.sprintAutoSave(userId, {
+      draftId: draftId ? Number(draftId) : null,
+      title,
+      content,
+    });
+    res.status(200).json({ draft });
+  } catch (error) {
+    if (error.message === "Draft not found for auto-save.") {
+      return res.status(404).json({ message: error.message });
+    }
+    console.error("Sprint auto-save error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+module.exports = {
+  createDraft,
+  getUserDrafts,
+  getDraftById,
+  getDraftsForSprintPicker,
+  updateDraft,
+  deleteDraft,
+  unpublishSubmission,
+  republishDraft,
+  postDraftToHub,
+  sprintAutoSave,
+};

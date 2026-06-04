@@ -1,15 +1,19 @@
 const express = require("express");
-const router = express.Router();
+const router  = express.Router();
 const notificationsController = require("../controllers/notificationController");
-const { authenticateJWT } = require("../config/jwt");
+const { authenticateJWT }     = require("../config/jwt");
 
-router.get("/", authenticateJWT, notificationsController.getNotifications);
+// ── Existing routes ───────────────────────────────────────────────────────────
+router.get("/",                authenticateJWT, notificationsController.getNotifications);
 router.post("/save-subscription", authenticateJWT, notificationsController.saveSubscription);
-router.post("/:userId/read", authenticateJWT, notificationsController.markRead);
-// Get user's notification preferences
-router.get("/preferences", authenticateJWT, notificationsController.getPreferences);
- 
-// Save / update user's notification preferences
-router.post("/preferences", authenticateJWT, notificationsController.savePreferences);
+router.post("/:userId/read",   authenticateJWT, notificationsController.markRead);
+router.get("/preferences",     authenticateJWT, notificationsController.getPreferences);
+router.post("/preferences",    authenticateJWT, notificationsController.savePreferences);
+
+// ── Sprint reminder opt-in ────────────────────────────────────────────────────
+// GET  /notifications/sprint-reminder  → { optedIn: boolean }
+// POST /notifications/sprint-reminder  body: { optedIn: boolean }
+router.get("/sprint-reminder",  authenticateJWT, notificationsController.getSprintReminderOptIn);
+router.post("/sprint-reminder", authenticateJWT, notificationsController.saveSprintReminderOptIn);
 
 module.exports = router;

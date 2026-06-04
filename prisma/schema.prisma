@@ -33,6 +33,7 @@ model User {
 
   // ── existing relations ──────────────────────────────────────────────────
   notificationPreference NotificationPreference?
+  sprintReminderOptIn    SprintReminderOptIn?  
   groupSprints        GroupSprint[]
   sprints             Sprint[]
   notification        Notification[]
@@ -54,6 +55,7 @@ model User {
   wallPostComments    WallPostComment[]
   wallPostReplies     WallPostReply[]
   soundscapes         Soundscape[]
+  writingDrafts       WritingDraft[]
 
   // ── feedback hub relations ──────────────────────────────────────────────
   feedbackPoints              FeedbackPoint?
@@ -393,42 +395,6 @@ model Soundscape {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WEEKLY SCHEDULE
-// ─────────────────────────────────────────────────────────────────────────────
-
-model WeeklySchedule {
-  id          Int      @id @default(autoincrement())
-  weekStart   DateTime @unique
-  title       String
-  description String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  sessions ScheduledSession[]
-
-  @@index([weekStart])
-  @@index([isActive])
-}
-
-model ScheduledSession {
-  id          Int      @id @default(autoincrement())
-  scheduleId  Int
-  dayOfWeek   Int
-  time        String
-  label       String?
-  isDone      Boolean   @default(false)
-  completedAt DateTime?
-  createdAt   DateTime  @default(now())
-
-  schedule WeeklySchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
-
-  @@index([scheduleId])
-  @@index([dayOfWeek])
-  @@index([isDone])
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // WRITING SNIPPET
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -460,8 +426,6 @@ model SnippetLike {
   @@index([snippetId])
 }
 
-// NOTE: userId is now nullable + SetNull so comments survive account deletion.
-// The UI should render "[deleted]" when userId is null.
 model SnippetComment {
   id        Int            @id @default(autoincrement())
   userId    Int?                                                          // <-- nullable
@@ -478,7 +442,7 @@ model SnippetComment {
   @@index([userId])
 }
 
-// NOTE: userId nullable + SetNull — same reasoning as SnippetComment.
+
 model SnippetReply {
   id        Int            @id @default(autoincrement())
   userId    Int?                                                          // <-- nullable
@@ -519,6 +483,26 @@ model SnippetReplyLike {
 // ─────────────────────────────────────────────────────────────────────────────
 // QUOTES, SUBSCRIPTIONS, NOTIFICATIONS
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPRINT REMINDER OPT-IN
+//
+// Tracks which users want to be notified before the weekly Friday sprint.
+// One row per user — upserted when they toggle the checkbox in the UI.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model SprintReminderOptIn {
+  id                    Int      @id @default(autoincrement())
+  userId                Int      @unique          // one row per user
+  optedIn               Boolean  @default(true)   // false = soft-disabled without deleting the row
+  reminderMinutesBefore Int      @default(30)      // future-proofing: user-configurable lead time
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user  User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([optedIn])   // the cron job filters on this
+}
 
 model Subscription {
   id           Int      @id @default(autoincrement())
@@ -583,7 +567,6 @@ model BlogPostLike {
   @@index([blogPostId])
 }
 
-// NOTE: authorId nullable + SetNull — blog comments survive account deletion.
 model BlogComment {
   id         Int         @id @default(autoincrement())
   blogPostId Int
@@ -598,7 +581,6 @@ model BlogComment {
   @@index([authorId])
 }
 
-// NOTE: authorId nullable + SetNull — blog replies survive account deletion.
 model BlogReply {
   id        Int         @id @default(autoincrement())
   commentId Int
@@ -616,10 +598,6 @@ model BlogReply {
 // WALL POST
 // ─────────────────────────────────────────────────────────────────────────────
 
-// NOTE: authorId nullable + SetNull — wall posts written by a deleted user are
-// preserved on the recipient's wall but show "[deleted]" as the author.
-// wallPostsReceived (profileId) stays Cascade: if your profile is gone, your
-// wall goes with it.
 model WallPost {
   id        Int      @id @default(autoincrement())
   authorId  Int?                                                          // <-- nullable
@@ -647,7 +625,6 @@ model WallPostLike {
   @@index([wallPostId])
 }
 
-// NOTE: userId nullable + SetNull — wall post comments survive account deletion.
 model WallPostComment {
   id         Int      @id @default(autoincrement())
   userId     Int?                                                         // <-- nullable
@@ -663,7 +640,6 @@ model WallPostComment {
   @@index([userId])
 }
 
-// NOTE: userId nullable + SetNull — wall post replies survive account deletion.
 model WallPostReply {
   id        Int             @id @default(autoincrement())
   userId    Int?                                                          // <-- nullable
@@ -702,47 +678,45 @@ model FeedbackPoint {
 }
 
 model FeedbackSubmission {
-  id               Int             @id @default(autoincrement())
+  id               Int              @id @default(autoincrement())
   userId           Int
   title            String
   genre            String
   summary          String
   content          String
-  critiqueCount    Int      @default(0)
-  isOutdated       Boolean  @default(false)
+  critiqueCount    Int              @default(0)
+  status           SubmissionStatus @default(QUEUE)
   wordCountTier    WordCountTier
   actualWordCount  Int
   draftStage       DraftStage
   contentWarnings  String[]
   feedbackWanted   String[]
   pointsCost       Int
-  wasFreePost      Boolean         @default(false)
-  isOpen           Boolean         @default(true)
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  wasFreePost      Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  isDraft          Boolean          @default(false)
+  unpublishedAt    DateTime?
+  writingDraft     WritingDraft?
+  
 
   user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   responses         FeedbackResponse[]
   paragraphComments ParagraphComment[]
 
   @@index([userId])
-  @@index([isOpen])
+  @@index([status])
   @@index([createdAt])
   @@index([genre])
 }
 
-// NOTE: criticId nullable + SetNull — full critiques survive account deletion.
-// The content (ratings + written feedback) is valuable to the submission author
-// and should not vanish just because the critic left.
 model FeedbackResponse {
   id                  Int                @id @default(autoincrement())
   submissionId        Int
   criticId            Int?                                               // <-- nullable
-  overallRating       Int?
-  clarityRating       Int?
-  pacingRating        Int?
-  believabilityRating Int?
   generalFeedback     String
+  tagResponses        Json?              // optional per-tag feedback, keyed by feedbackWanted tag name
   pointsEarned        Int
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
@@ -772,7 +746,6 @@ model FeedbackResponseUpvote {
   @@index([responseId])
 }
 
-// NOTE: authorId nullable + SetNull — paragraph comments survive account deletion.
 model ParagraphComment {
   id             Int                @id @default(autoincrement())
   submissionId   Int
@@ -805,7 +778,6 @@ model ParagraphCommentUpvote {
   @@index([commentId])
 }
 
-// NOTE: authorId nullable + SetNull — paragraph comment replies survive account deletion.
 model ParagraphCommentReply {
   id        Int              @id @default(autoincrement())
   commentId Int
@@ -818,6 +790,26 @@ model ParagraphCommentReply {
 
   @@index([commentId])
   @@index([authorId])
+}
+
+model WritingDraft {
+  id                   Int                 @id @default(autoincrement())
+  userId               Int
+  title                String?
+  content              String              @default("")
+  wordCount            Int                 @default(0)
+
+  // If this draft came from unpublishing a submission, link it
+  sourceSubmissionId   Int?                @unique
+
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  user                 User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceSubmission     FeedbackSubmission? @relation(fields: [sourceSubmissionId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model DiscoveryStory {
@@ -974,12 +966,18 @@ enum DraftStage {
   FINAL_EDIT // be ruthless
 }
 
+enum SubmissionStatus {
+  QUEUE      // waiting for first critique
+  SPOTLIGHT  // received ≥1 critique, actively featured
+  ARCHIVE    // received ≥3 critiques, closed for new feedback
+}
+
 enum WordCountTier {
-  TIER_1000  // ≤1,000 words — costs/earns 10 pts
-  TIER_2000  // ≤2,000 words — costs/earns 20 pts
-  TIER_3000  // ≤3,000 words — costs/earns 30 pts
-  TIER_4000  // ≤4,000 words — costs/earns 40 pts
-  TIER_5000  // ≤5,000 words — costs/earns 50 pts 
+  TIER_1000  // ≤1,000 words — costs/earns 1 pt
+  TIER_2000  // ≤2,000 words — costs/earns 2 pts
+  TIER_3000  // ≤3,000 words — costs/earns 3 pts
+  TIER_4000  // ≤4,000 words — costs/earns 4 pts
+  TIER_5000  // ≤5,000 words — costs/earns 5 pts
 }
 
 enum WritingPhase {

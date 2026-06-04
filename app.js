@@ -5,6 +5,7 @@ const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const multer = require("multer");
 require("./jobs/streakbreaker.job");
+require("./jobs/scheduledjobs");
 const rateLimit = require("express-rate-limit");
 
 const authRoutes        = require("./src/routes/authRoutes");
@@ -22,6 +23,7 @@ const feedbackRoutes    = require("./src/routes/feedbackRoutes");
 const discoveryRoutes = require("./src/routes/discoveryroutes");
 const eventRoutes = require("./src/routes/eventroutes");
 const leaderboardRoutes = require("./src/routes/leaderboardRoutes");
+const draftRoutes = require("./src/routes/draftroutes");
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -56,6 +58,7 @@ app.use("/api/feedback",      feedbackRoutes);
 app.use("/api/discovery", discoveryRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/leaderboard", leaderboardRoutes)
+app.use("/api/drafts", draftRoutes);
 
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError || err.message === "Unsupported file type") {

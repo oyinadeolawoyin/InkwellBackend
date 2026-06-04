@@ -67,7 +67,6 @@ async function getUserSubmissions(req, res) {
       page:   Number(page),
       limit:  Math.min(Number(limit), 50),
       userId,
-      isOpen: undefined,
     });
     res.json(result);
   } catch (err) {
@@ -76,17 +75,14 @@ async function getUserSubmissions(req, res) {
 }
 
 async function getSubmissions(req, res) {
-  // When userId is present (profile page), pass it through without forcing isOpen
-  // so both open and closed submissions are returned for that user.
   try {
-    const { page = 1, limit = 20, genre, isOpen } = req.query;
+    const { page = 1, limit = 20, genre, status } = req.query;
     const result = await feedbackService.getSubmissions({
       page:   Number(page),
       limit:  Math.min(Number(limit), 50),
       genre,
+      status,
       userId: req.query.userId ? Number(req.query.userId) : undefined,
-      // Only apply isOpen filter when not filtering by a specific user
-      isOpen: req.query.userId ? undefined : (isOpen !== "false"),
     });
     res.json(result);
   } catch (err) {
@@ -106,30 +102,6 @@ async function getSubmissionById(req, res) {
   }
 }
 
-async function closeSubmission(req, res) {
-  try {
-    const submission = await feedbackService.closeSubmission(
-      Number(req.params.id),
-      req.user.id
-    );
-    res.json(submission);
-  } catch (err) {
-    res.status(errStatus(err.message)).json({ message: err.message });
-  }
-}
-
-
-async function reopenSubmission(req, res) {
-  try {
-    const submission = await feedbackService.reopenSubmission(
-      Number(req.params.id),
-      req.user.id
-    );
-    res.json(submission);
-  } catch (err) {
-    res.status(errStatus(err.message)).json({ message: err.message });
-  }
-}
 async function updateSubmission(req, res) {
   try {
     const submission = await feedbackService.updateSubmission(
@@ -158,7 +130,22 @@ async function deleteSubmission(req, res) {
 async function getSpotlight(req, res) {
   try {
     const submissions = await feedbackService.getSpotlightSubmissions();
+    // console.log("spo", submissions);
     res.json(submissions);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+}
+
+async function getQueue(req, res) {
+  try {
+    const { page = 1, limit = 10, genre } = req.query;
+    const result = await feedbackService.getQueueSubmissions({
+      page:  Number(page),
+      limit: Math.min(Number(limit), 50),
+      genre: genre || undefined,
+    }); console.log("que", result);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -181,6 +168,15 @@ async function getArchive(req, res) {
 async function getArchiveGenres(req, res) {
   try {
     const genres = await feedbackService.getArchiveGenres();
+    res.json(genres);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+}
+
+async function getQueueGenres(req, res) {
+  try {
+    const genres = await feedbackService.getQueueGenres();
     res.json(genres);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -435,13 +431,13 @@ module.exports = {
   getSubmissions,
   getSubmissionById,
   getUserSubmissions,
-  closeSubmission,
-  reopenSubmission,
   updateSubmission,
   deleteSubmission,
   getSpotlight,
+  getQueue,
   getArchive,
   getArchiveGenres,
+  getQueueGenres,
   createResponse,
   updateResponse,
   toggleResponseUpvote,

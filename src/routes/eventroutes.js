@@ -39,7 +39,7 @@ router.get("/:eventId/winners", eventController.fetchEventWinners);
 
 // Full event list for the admin dashboard
 // GET /api/events/admin/all
-router.get("/admin/all", authenticateJWT, isAdmin, eventController.fetchAllEvents);
+router.get("/all", authenticateJWT, eventController.fetchAllEvents);
 
 // Create a new event
 // POST /api/events/admin/create

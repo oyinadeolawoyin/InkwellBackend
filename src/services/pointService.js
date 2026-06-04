@@ -3,26 +3,35 @@ const prisma = require("../config/prismaClient");
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
-const BOOTSTRAP_FREE_SLOTS = 3;   // first 3 unique users to post get a free pass (was 5)
+const BOOTSTRAP_FREE_SLOTS = 3;   // first 3 unique users to post get a free pass
 const NEW_MEMBER_SEED      = 2;   // posting pts every new member starts with
 
-// Points earned per critique = 5 pts per 500 words
-// Same value doubles as the posting cost — you pay what you'd earn by critiquing.
+// Full tier points per word-count bracket.
+// SPOTLIGHT  → full points
+// QUEUE      → full points - 2
+// ARCHIVE    → half of full points
 const TIER_COSTS = {
-  TIER_1000: 10,   // 1000 words → 2 × 500 = 10 pts
-  TIER_2000: 20,   // 2000 words → 4 × 500 = 20 pts
-  TIER_3000: 30,   // 3000 words → 6 × 500 = 30 pts
-  TIER_4000: 40,   // 4000 words → 8 × 500 = 40 pts
-  TIER_5000: 50,   // 5000 words → 10 × 500 = 40 pts
+  TIER_1000: 10,   // ≤1000 words
+  TIER_2000: 20,   // ≤2000 words
+  TIER_3000: 30,   // ≤3000 words
+  TIER_4000: 40,   // ≤4000 words
+  TIER_5000: 50,   // ≤5000 words
 };
 
-// Full-critique upvote: flat +3 pts per upvote (posting balance + reputation)
-const CRITIQUE_UPVOTE_BONUS = 2;
+// Multi-chapter surcharge: each active chapter (QUEUE or SPOTLIGHT) already
+// held by the writer adds +2 to the cost of posting another.
+const MULTI_CHAPTER_SURCHARGE = 2;
 
-// Paragraph comment upvotes: milestone-based — 1 pt per every 2 upvotes
-// e.g. 2 upvotes → 1 pt, 4 upvotes → 2 pts, 6 upvotes → 3 pts
-const PARAGRAPH_UPVOTE_MILESTONE    = 2;
-const PARAGRAPH_UPVOTE_PER_MILESTONE = 1;
+// QUEUE penalty: critiquing a QUEUE work earns 2 fewer points than full tier cost
+const QUEUE_CRITIQUE_PENALTY = 2;
+
+// Spotlight long-stay bonus: works that have been in SPOTLIGHT for more than this
+// many days earn the critic +2 extra points on top of the normal SPOTLIGHT payout
+const SPOTLIGHT_LONGSTAY_DAYS   = 10;
+const SPOTLIGHT_LONGSTAY_BONUS  = 2;
+
+// Reputation points awarded (and deducted on un-upvote) per critique upvote
+const UPVOTE_REPUTATION_AWARD = 2;
 
 // Reputation tiers
 const TIERS = [
@@ -33,13 +42,50 @@ const TIERS = [
   { name: "Diamond",  min: 1500, max: Infinity,  gem: "D", color: "#D85A30" },
 ];
 
-// This function determines if they get full or half points
-function calculateCritiquePoints(wordCountTier, isOutdated) {
-  // Use the existing TIER_COSTS mapping (10, 20, 30, 40)
-  const points = TIER_COSTS[wordCountTier] || 10;
-  
-  // If the work is already in the archive (outdated), give 50% points
-  return isOutdated ? points / 2 : points;
+/**
+ * Calculate points a critic earns for a critique.
+ *
+ * Status rules:
+ *   SPOTLIGHT → full tier points (+ longStayBonus if in SPOTLIGHT > 10 days)
+ *   QUEUE     → full tier points - QUEUE_CRITIQUE_PENALTY (2)
+ *   ARCHIVE   → half of full tier points
+ *
+ * @param {string}   wordCountTier    - Submission's word-count tier (TIER_1000, etc.)
+ * @param {string}   submissionStatus - "QUEUE" | "SPOTLIGHT" | "ARCHIVE"
+ * @param {Date|null} spotlightSince  - When the submission entered SPOTLIGHT (createdAt
+ *                                      or updatedAt); pass null for non-SPOTLIGHT works
+ *
+ * Returns: { basePoints, longStayBonus, totalPoints, isSpotlight, isLongStay }
+ */
+function calculateCritiquePoints(wordCountTier, submissionStatus, spotlightSince = null) {
+  const full = TIER_COSTS[wordCountTier] || 1;
+
+  let base;
+  if (submissionStatus === "ARCHIVE") {
+    base = Math.floor(full / 2);
+  } else if (submissionStatus === "QUEUE") {
+    base = Math.max(0, full - QUEUE_CRITIQUE_PENALTY);
+  } else {
+    // SPOTLIGHT
+    base = full;
+  }
+
+  const isSpotlight = submissionStatus === "SPOTLIGHT";
+
+  // Long-stay bonus: SPOTLIGHT work older than SPOTLIGHT_LONGSTAY_DAYS earns +2
+  let longStayBonus = 0;
+  let isLongStay    = false;
+  if (isSpotlight && spotlightSince) {
+    const daysInSpotlight = (Date.now() - new Date(spotlightSince).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysInSpotlight > SPOTLIGHT_LONGSTAY_DAYS) {
+      longStayBonus = SPOTLIGHT_LONGSTAY_BONUS;
+      isLongStay    = true;
+    }
+  }
+
+  const totalPoints = base + longStayBonus;
+
+  return { basePoints: base, longStayBonus, totalPoints, isSpotlight, isLongStay };
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -52,6 +98,21 @@ function getTierCost(wordCountTier) {
   const cost = TIER_COSTS[wordCountTier];
   if (!cost) throw new Error(`Unknown word count tier: ${wordCountTier}`);
   return cost;
+}
+
+/**
+ * Calculate the full posting cost for a writer, including the multi-chapter surcharge.
+ * activeChapters = number of submissions the writer currently has in QUEUE or SPOTLIGHT.
+ * Formula: tierCost + (activeChapters × MULTI_CHAPTER_SURCHARGE)
+ *
+ * @param {string} wordCountTier
+ * @param {number} activeChapters  — count of writer's current QUEUE + SPOTLIGHT submissions
+ * @returns {{ tierCost, surcharge, totalCost }}
+ */
+function calculatePostingCost(wordCountTier, activeChapters = 0) {
+  const tierCost  = getTierCost(wordCountTier);
+  const surcharge = activeChapters * MULTI_CHAPTER_SURCHARGE;
+  return { tierCost, surcharge, totalCost: tierCost + surcharge };
 }
 
 // Returns the new tier name if reputation crossed a tier boundary, else null.
@@ -79,9 +140,6 @@ async function getWallet(userId) {
   if (!wallet) wallet = await initWallet(userId);
 
   // Check if this user can still claim a free post.
-  // Both conditions must be true:
-  //   1. The user hasn't used their personal free post yet
-  //   2. The global bootstrap pool still has slots available
   let freePostAvailable = false;
   if (!wallet.usedFreePost) {
     const bootstrap = await prisma.feedbackHubBootstrap.findUnique({ where: { id: 1 } });
@@ -89,7 +147,20 @@ async function getWallet(userId) {
     freePostAvailable = posterCount < BOOTSTRAP_FREE_SLOTS;
   }
 
-  return { ...wallet, tier: getTier(wallet.reputation), TIER_COSTS, freePostAvailable };
+  // Count writer's active chapters (QUEUE or SPOTLIGHT) so the frontend
+  // can show the real posting cost before they click "Post".
+  const activeChapterCount = await prisma.feedbackSubmission.count({
+    where: { userId, status: { in: ["QUEUE", "SPOTLIGHT"] } },
+  });
+
+  return {
+    ...wallet,
+    tier: getTier(wallet.reputation),
+    TIER_COSTS,
+    MULTI_CHAPTER_SURCHARGE,
+    activeChapterCount,
+    freePostAvailable,
+  };
 }
 
 // ─── BOOTSTRAP CHECK ─────────────────────────────────────────────────────────
@@ -123,41 +194,29 @@ async function checkAndClaimFreePost(userId, tx = prisma) {
 
 // ─── DEDUCT POSTING COST ─────────────────────────────────────────────────────
 
-async function deductPostingCost(userId, wordCountTier, tx = prisma) {
-  const cost   = getTierCost(wordCountTier);
+/**
+ * Deduct the full posting cost (tier cost + multi-chapter surcharge) from the writer's wallet.
+ * The caller must pass the pre-calculated totalCost from calculatePostingCost().
+ *
+ * @param {number} userId
+ * @param {number} totalCost   — result of calculatePostingCost().totalCost
+ * @param {object} tx          — prisma transaction client
+ */
+async function deductPostingCost(userId, totalCost, tx = prisma) {
   const wallet = await tx.feedbackPoint.findUnique({ where: { userId } });
   if (!wallet) throw new Error("Wallet not found. User may not be initialised.");
-  if (wallet.postingBalance < cost) {
+  if (wallet.postingBalance < totalCost) {
     throw new Error(
-      `Not enough points. You need ${cost} pts to post at this tier but only have ${wallet.postingBalance}.`
+      `Not enough points. You need ${totalCost} pts to post but only have ${wallet.postingBalance}.`
     );
   }
   return tx.feedbackPoint.update({
     where: { userId },
-    data:  { postingBalance: { decrement: cost } },
+    data:  { postingBalance: { decrement: totalCost } },
   });
 }
 
 // ─── AWARD CRITIQUE POINTS ───────────────────────────────────────────────────
-// Called when a critic submits a FeedbackResponse.
-// ONLY postingBalance increases — reputation is NOT touched.
-// Reputation is built exclusively through upvotes received.
-
-// async function awardCritiquePoints(criticId, wordCountTier, tx = prisma) {
-//   const earned = getTierCost(wordCountTier);
-//   return tx.feedbackPoint.upsert({
-//     where:  { userId: criticId },
-//     update: {
-//       postingBalance: { increment: earned },
-//       // ⚠ reputation intentionally NOT incremented here
-//     },
-//     create: {
-//       userId:         criticId,
-//       postingBalance: NEW_MEMBER_SEED + earned,
-//       reputation:     0,
-//     },
-//   });
-// }
 
 // Updated to take the actual points calculated above
 async function awardCritiquePoints(criticId, pointsToAward, tx = prisma) {
@@ -174,93 +233,22 @@ async function awardCritiquePoints(criticId, pointsToAward, tx = prisma) {
   });
 }
 
-// ─── CRITIQUE UPVOTE BONUS ───────────────────────────────────────────────────
-// Flat +3 to BOTH postingBalance AND reputation per upvote on a full critique.
+// (Extra-word bonus removed — critiques earn a flat amount based on submission status only.)
 
-async function awardCritiqueUpvoteBonus(recipientId, tx = prisma) {
-  return tx.feedbackPoint.upsert({
-    where:  { userId: recipientId },
-    update: {
-      postingBalance: { increment: CRITIQUE_UPVOTE_BONUS },
-      reputation:     { increment: CRITIQUE_UPVOTE_BONUS },
-    },
-    create: {
-      userId:         recipientId,
-      postingBalance: NEW_MEMBER_SEED + CRITIQUE_UPVOTE_BONUS,
-      reputation:     CRITIQUE_UPVOTE_BONUS,
-    },
-  });
-}
-
-// Un-upvoting a critique: rolls back postingBalance only — reputation is never decremented.
-async function reverseCritiqueUpvoteBonus(recipientId, tx = prisma) {
-  return tx.feedbackPoint.update({
-    where: { userId: recipientId },
-    data:  { postingBalance: { decrement: CRITIQUE_UPVOTE_BONUS } },
-  });
-}
-
-// ─── PARAGRAPH COMMENT UPVOTE MILESTONES ─────────────────────────────────────
-// Awards 1 pt per every 2 upvotes on a paragraph comment (milestone-based).
-// Called AFTER the new upvote record is saved, so newUpvoteTotal is the fresh count.
-// Both postingBalance AND reputation increase (it's still an upvote reward).
-//
-// Returns: { awarded: boolean, pointsAwarded: number }
-
-async function checkAndAwardParagraphUpvoteMilestone(commentAuthorId, newUpvoteTotal, tx = prisma) {
-  const prevTotal      = newUpvoteTotal - 1;
-  const prevMilestones = Math.floor(prevTotal      / PARAGRAPH_UPVOTE_MILESTONE);
-  const newMilestones  = Math.floor(newUpvoteTotal / PARAGRAPH_UPVOTE_MILESTONE);
-  const milestonesHit  = newMilestones - prevMilestones;
-
-  if (milestonesHit <= 0) return { awarded: false, pointsAwarded: 0 };
-
-  const pts = milestonesHit * PARAGRAPH_UPVOTE_PER_MILESTONE;
-  await tx.feedbackPoint.upsert({
-    where:  { userId: commentAuthorId },
-    update: {
-      postingBalance: { increment: pts },
-      reputation:     { increment: pts },
-    },
-    create: {
-      userId:         commentAuthorId,
-      postingBalance: NEW_MEMBER_SEED + pts,
-      reputation:     pts,
-    },
-  });
-
-  return { awarded: true, pointsAwarded: pts };
-}
-
-// Un-upvoting a paragraph comment: reverses postingBalance if a milestone is lost.
-// Reputation is NEVER decremented.
-// Returns: { reversed: boolean, pointsDeducted: number }
-
-async function checkAndReverseParagraphUpvoteMilestone(commentAuthorId, newUpvoteTotal, tx = prisma) {
-  const prevTotal      = newUpvoteTotal + 1;
-  const prevMilestones = Math.floor(prevTotal      / PARAGRAPH_UPVOTE_MILESTONE);
-  const newMilestones  = Math.floor(newUpvoteTotal / PARAGRAPH_UPVOTE_MILESTONE);
-  const milestonesLost = prevMilestones - newMilestones;
-
-  if (milestonesLost <= 0) return { reversed: false, pointsDeducted: 0 };
-
-  const pts = milestonesLost * PARAGRAPH_UPVOTE_PER_MILESTONE;
-  await tx.feedbackPoint.update({
-    where: { userId: commentAuthorId },
-    data:  { postingBalance: { decrement: pts } },
-  });
-
-  return { reversed: true, pointsDeducted: pts };
-}
+// Note: Upvote point rewards have been removed from the system.
+// Upvotes on critiques and paragraph comments are purely social signals now.
 
 module.exports = {
   TIER_COSTS,
-  CRITIQUE_UPVOTE_BONUS,
-  PARAGRAPH_UPVOTE_MILESTONE,
-  PARAGRAPH_UPVOTE_PER_MILESTONE,
+  MULTI_CHAPTER_SURCHARGE,
+  QUEUE_CRITIQUE_PENALTY,
+  SPOTLIGHT_LONGSTAY_DAYS,
+  SPOTLIGHT_LONGSTAY_BONUS,
   BOOTSTRAP_FREE_SLOTS,
   TIERS,
+  UPVOTE_REPUTATION_AWARD,
   calculateCritiquePoints,
+  calculatePostingCost,
   getTier,
   getTierCost,
   detectTierChange,
@@ -269,8 +257,4 @@ module.exports = {
   checkAndClaimFreePost,
   deductPostingCost,
   awardCritiquePoints,
-  awardCritiqueUpvoteBonus,
-  reverseCritiqueUpvoteBonus,
-  checkAndAwardParagraphUpvoteMilestone,
-  checkAndReverseParagraphUpvoteMilestone,
 };

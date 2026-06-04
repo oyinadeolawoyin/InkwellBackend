@@ -1,6 +1,7 @@
 // src/services/feedbackService.js
 const prisma               = require("../config/prismaClient");
 const pointsService        = require("./pointService");
+const { UPVOTE_REPUTATION_AWARD } = pointsService;
 const { isBlocked }        = require("./userService");
 
 // ─── WORD COUNT HELPERS ───────────────────────────────────────────────────────
@@ -13,10 +14,76 @@ const TIER_MAX_WORDS = {
   TIER_5000: 5000,
 };
 
-const GENERAL_FEEDBACK_MIN_WORDS = 150;
+const GENERAL_FEEDBACK_MIN_WORDS_SHORT = 200; // for chapters ≤ TIER_3000
+const GENERAL_FEEDBACK_MIN_WORDS_LONG  = 300; // for chapters ≥ TIER_4000
+
+// Tiers that require the longer minimum
+const LONG_CRITIQUE_TIERS = new Set(["TIER_4000", "TIER_5000"]);
 
 function countWords(text) {
-  return text.trim().split(/\s+/).filter(Boolean).length;
+  // Strip HTML tags (including the data-editor-styles wrapper) before counting
+  const plain = text.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ");
+  return plain.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * Normalize paragraph spacing in chapter content.
+ * Rules:
+ *   - If no blank line between paragraphs → add one
+ *   - More than one blank line → collapse to one
+ * Works on both plain text and HTML (strips tags first to detect structure,
+ * but operates on the raw text/HTML string from the editor).
+ */
+function normalizeSpacing(content) {
+  if (!content) return content;
+
+  // Detect HTML content
+  const isHtml = /<[a-z][\s\S]*>/i.test(content);
+
+  if (isHtml) {
+    // For HTML: we normalize the spacing between block-level elements.
+    // The WriteEditor wraps each "paragraph" in a <div> or <p>.
+    // We strip the hidden editor-styles marker, then collapse consecutive
+    // empty block elements (those with only whitespace inside).
+    // 1. Remove the hidden style marker div
+    let normalized = content.replace(/<div[^>]*data-editor-styles[^>]*>[\s\S]*?<\/div>/gi, "");
+
+    // 2. Replace 3+ consecutive empty block tags with exactly 2 (one blank "paragraph")
+    //    Empty block = <div></div>, <p></p>, <div><br></div>, <p><br></p>, etc.
+    const emptyBlock = /(<(?:div|p)[^>]*>(?:<br\s*\/?>|&nbsp;|\s)*<\/(?:div|p)>)/gi;
+    // Collapse runs of 3+ empty blocks to 2
+    let prev;
+    do {
+      prev = normalized;
+      normalized = normalized.replace(
+        new RegExp(`(${emptyBlock.source})(\\s*${emptyBlock.source}){2,}`, "gi"),
+        "$1$3"
+      );
+    } while (normalized !== prev);
+
+    return normalized;
+  }
+
+  // Plain text: split on newlines, then rebuild with exactly one blank line between paragraphs
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+
+  // Group into paragraphs (non-empty line runs)
+  const paras = [];
+  let current = [];
+  for (const line of lines) {
+    if (line.trim() === "") {
+      if (current.length > 0) {
+        paras.push(current.join("\n"));
+        current = [];
+      }
+    } else {
+      current.push(line);
+    }
+  }
+  if (current.length > 0) paras.push(current.join("\n"));
+
+  // Re-join with exactly one blank line between paragraphs
+  return paras.join("\n\n");
 }
 
 function validateChapterWordCount(content, tier) {
@@ -31,12 +98,15 @@ function validateChapterWordCount(content, tier) {
   return count;
 }
 
-function validateGeneralFeedback(text) {
+function validateGeneralFeedback(text, wordCountTier = null) {
+  const minWords = wordCountTier && LONG_CRITIQUE_TIERS.has(wordCountTier)
+    ? GENERAL_FEEDBACK_MIN_WORDS_LONG
+    : GENERAL_FEEDBACK_MIN_WORDS_SHORT;
   const words = countWords(text);
-  if (words < GENERAL_FEEDBACK_MIN_WORDS) {
+  if (words < minWords) {
     throw new Error(
       `Your general feedback is ${words} word${words === 1 ? "" : "s"}. ` +
-      `Please write at least ${GENERAL_FEEDBACK_MIN_WORDS} words — ` +
+      `Please write at least ${minWords} words — ` +
       `a good critique needs enough detail to genuinely help the writer.`
     );
   }
@@ -109,24 +179,17 @@ async function createSubmission(userId, data) {
     throw new Error("Please add at least one specific feedback request.");
   }
 
-  // One-spotlight-at-a-time rule: block if user already has an active spotlight post
-  const existingSpotlight = await prisma.feedbackSubmission.findFirst({
-    where: {
-      userId,
-      isOutdated: false,
-      isOpen: true,
-      critiqueCount: { lt: 3 },
-    },
-    select: { id: true, title: true },
-  });
-  if (existingSpotlight) {
-    throw new Error(
-    `You already have a chapter in the spotlight: "${existingSpotlight.title}". It needs to receive 3 critiques and move to the archive before you can post again.`
-    );
-  }
-
   const actualWordCount = validateChapterWordCount(content, wordCountTier);
-  const cost            = pointsService.getTierCost(wordCountTier);
+
+  // Count writer's current active chapters (QUEUE or SPOTLIGHT) to calculate surcharge
+  const activeChapterCount = await prisma.feedbackSubmission.count({
+    where: { userId, status: { in: ["QUEUE", "SPOTLIGHT"] } },
+  });
+
+  const { tierCost, surcharge, totalCost } = pointsService.calculatePostingCost(
+    wordCountTier,
+    activeChapterCount,
+  );
 
   const submission = await prisma.$transaction(async (tx) => {
     let wallet = await tx.feedbackPoint.findUnique({ where: { userId } });
@@ -139,8 +202,22 @@ async function createSubmission(userId, data) {
     const isFreePost = await pointsService.checkAndClaimFreePost(userId, tx);
 
     if (!isFreePost) {
-      await pointsService.deductPostingCost(userId, wordCountTier, tx);
+      await pointsService.deductPostingCost(userId, totalCost, tx);
     }
+
+    // Assign to SPOTLIGHT only if (a) a slot is free AND (b) this author
+    // doesn't already have a chapter in the spotlight. If the author is
+    // already spotlighted, their new chapter must wait in QUEUE — even
+    // when open slots exist — and will be promoted once their current
+    // spotlight chapter is archived.
+    const spotlightCount = await tx.feedbackSubmission.count({
+      where: { status: "SPOTLIGHT" },
+    });
+    const authorAlreadyInSpotlight = await tx.feedbackSubmission.count({
+      where: { userId, status: "SPOTLIGHT" },
+    });
+    const initialStatus =
+      spotlightCount < 6 && authorAlreadyInSpotlight === 0 ? "SPOTLIGHT" : "QUEUE";
 
     return tx.feedbackSubmission.create({
       data: {
@@ -148,33 +225,34 @@ async function createSubmission(userId, data) {
         title:          title.trim(),
         genre:          genre.trim(),
         summary:        summary.trim(),
-        content:        content.trim(),
+        content:        normalizeSpacing(content.trim()),
         wordCountTier,
         actualWordCount,
         draftStage,
         contentWarnings,
         feedbackWanted,
-        pointsCost:  isFreePost ? 0 : cost,
+        pointsCost:  isFreePost ? 0 : totalCost,
         wasFreePost: isFreePost,
+        status:      initialStatus,
       },
       include: {
         ...submissionMeta,
-        // user.email is needed by the controller for notifyUser — include it here
-        // so the controller never needs a second DB round-trip
         user: { select: { id: true, username: true, email: true, avatar: true } },
       },
     });
   });
 
-  return submission;
+  return { ...submission, costBreakdown: { tierCost, surcharge, totalCost, activeChapterCount } };
 }
 
-async function getSubmissions({ page = 1, limit = 20, genre, isOpen = true, userId } = {}) {
+async function getSubmissions({ page = 1, limit = 20, genre, status, userId } = {}) {
   const skip  = (page - 1) * limit;
   const where = {};
-  // When a userId is given (profile page), show ALL their submissions (open + closed).
-  // isOpen filter only applies to the global public feed.
-  if (!userId && isOpen !== undefined) where.isOpen = isOpen;
+  // When a userId is given (profile page), show ALL their submissions.
+  // status filter only applies to the global public feed.
+  if (!userId && status) where.status = status;
+  if (!userId && !status) where.status = { in: ["QUEUE", "SPOTLIGHT"] }; // default: active only
+  if (!userId) where.isDraft = false; // never show draft-hidden submissions on public feed
   if (genre)  where.genre  = genre;
   if (userId) where.userId = userId;
 
@@ -228,49 +306,16 @@ async function getSubmissionById(id, requestingUserId = null) {
   return submission;
 }
 
-async function closeSubmission(submissionId, userId) {
-  const sub = await prisma.feedbackSubmission.findUnique({ where: { id: submissionId } });
-  if (!sub) throw new Error("Submission not found.");
-  if (sub.userId !== userId) throw new Error("Not authorised.");
-  return prisma.feedbackSubmission.update({
-    where: { id: submissionId },
-    data:  { isOpen: false },
-  });
-}
-
-async function reopenSubmission(submissionId, userId) {
-  const sub = await prisma.feedbackSubmission.findUnique({ where: { id: submissionId } });
-  if (!sub) throw new Error("Submission not found.");
-  if (sub.userId !== userId) throw new Error("Not authorised.");
-  if (sub.isOutdated) throw new Error("Outdated submissions cannot be reopened.");
-  return prisma.feedbackSubmission.update({
-    where: { id: submissionId },
-    data:  { isOpen: true },
-  });
-}
-
 async function deleteSubmission(submissionId, userId) {
   const sub = await prisma.feedbackSubmission.findUnique({ where: { id: submissionId } });
   if (!sub) throw new Error("Submission not found.");
   if (sub.userId !== userId) throw new Error("Not authorised.");
 
-  const responseCount = await prisma.feedbackResponse.count({ where: { submissionId } });
+  // Points are never refunded on deletion — the cost is the price of posting,
+  // regardless of whether the submission received critiques or not.
+  await prisma.feedbackSubmission.delete({ where: { id: submissionId } });
 
-  await prisma.$transaction(async (tx) => {
-    if (responseCount === 0 && !sub.wasFreePost && sub.pointsCost > 0) {
-      await tx.feedbackPoint.update({
-        where: { userId },
-        data:  { postingBalance: { increment: sub.pointsCost } },
-      });
-    }
-    await tx.feedbackSubmission.delete({ where: { id: submissionId } });
-  });
-
-  return {
-    deleted:        true,
-    refunded:       responseCount === 0 && !sub.wasFreePost,
-    pointsRefunded: responseCount === 0 && !sub.wasFreePost ? sub.pointsCost : 0,
-  };
+  return { deleted: true };
 }
 
 // ─── UPDATE SUBMISSION ────────────────────────────────────────────────────────
@@ -326,7 +371,7 @@ async function updateSubmission(submissionId, userId, data) {
       ...(title           !== undefined && { title:           title.trim() }),
       ...(genre           !== undefined && { genre:           genre.trim() }),
       ...(summary         !== undefined && { summary:         summary.trim() }),
-      ...(content         !== undefined && { content:         content.trim(),
+      ...(content         !== undefined && { content:         normalizeSpacing(content.trim()),
                                              actualWordCount: countWords(content) }),
       ...(draftStage      !== undefined && { draftStage }),
       ...(contentWarnings !== undefined && { contentWarnings }),
@@ -336,17 +381,65 @@ async function updateSubmission(submissionId, userId, data) {
   });
 }
 
-// 1. Fetch the Spotlight (Top 6 oldest that need critiques, one per user)
+// 1. Fetch the Spotlight (Top 6 oldest that are in SPOTLIGHT status, one per user)
 async function getSpotlightSubmissions() {
-  // Fetch more than needed so we have room to deduplicate per user
+  // Fill any open spotlight slots from QUEUE before fetching — handles submissions
+  // created before the slot-check logic was in place, or any edge-case gaps.
+  const currentSpotlightCount = await prisma.feedbackSubmission.count({
+    where: { status: "SPOTLIGHT", isDraft: false },
+  });
+
+  const slotsToFill = 7 - currentSpotlightCount;
+
+  if (slotsToFill > 0) {
+    // Collect authors already occupying a spotlight slot so we don't
+    // give them a second one while they still have a chapter there.
+    const spotlightedAuthorIds = (
+      await prisma.feedbackSubmission.findMany({
+        where:  { status: "SPOTLIGHT", isDraft: false },
+        select: { userId: true },
+      })
+    ).map(s => s.userId);
+
+    // Pick the oldest QUEUE chapters whose authors aren't already spotlighted,
+    // one per author (deduplicate in JS after the DB fetch).
+    const queueCandidates = await prisma.feedbackSubmission.findMany({
+      where: {
+        status:  "QUEUE",
+        isDraft: false,
+        ...(spotlightedAuthorIds.length > 0 && {
+          userId: { notIn: spotlightedAuthorIds },
+        }),
+      },
+      orderBy: { createdAt: "asc" },
+      // Fetch more than needed so we can deduplicate per-author in JS
+      take: slotsToFill * 5,
+    });
+
+    // One chapter per author, oldest first, up to slotsToFill
+    const seenAuthors = new Set();
+    const nextInLine = [];
+    for (const s of queueCandidates) {
+      if (!seenAuthors.has(s.userId)) {
+        seenAuthors.add(s.userId);
+        nextInLine.push(s);
+      }
+      if (nextInLine.length === slotsToFill) break;
+    }
+
+    if (nextInLine.length > 0) {
+      await prisma.feedbackSubmission.updateMany({
+        where: { id: { in: nextInLine.map(s => s.id) } },
+        data:  { status: "SPOTLIGHT" },
+      });
+    }
+  }
+
+  // Now fetch the updated spotlight
   const candidates = await prisma.feedbackSubmission.findMany({
-    where: {
-      isOutdated: false,
-      isOpen: true,
-      critiqueCount: { lt: 3 }
-    },
+    where:   { status: "SPOTLIGHT", isDraft: false },
     include: submissionMeta,
-    orderBy: { createdAt: 'asc' }, // Oldest first to move the queue
+    orderBy: { createdAt: "asc" },
   });
 
   // Keep only the single oldest submission per user
@@ -366,12 +459,7 @@ async function getSpotlightSubmissions() {
 // 2. Fetch Outdated (Archive) — supports optional genre filter
 async function getOutdatedSubmissions({ page = 1, limit = 10, genre } = {}) {
   const skip = (page - 1) * limit;
-  const baseWhere = {
-    OR: [
-      { isOutdated: true },
-      { critiqueCount: { gte: 3 } }
-    ]
-  };
+  const baseWhere = { status: "ARCHIVE", isDraft: false };
   const where = genre ? { AND: [baseWhere, { genre }] } : baseWhere;
 
   const [items, total] = await Promise.all([
@@ -390,42 +478,68 @@ async function getOutdatedSubmissions({ page = 1, limit = 10, genre } = {}) {
 
 // 3. Get distinct genres present in the archive (for filter tabs)
 async function getArchiveGenres() {
-  const baseWhere = {
-    OR: [
-      { isOutdated: true },
-      { critiqueCount: { gte: 3 } }
-    ]
-  };
   const rows = await prisma.feedbackSubmission.findMany({
-    where: baseWhere,
-    select: { genre: true },
+    where:   { status: "ARCHIVE", isDraft: false },
     distinct: ['genre'],
     orderBy: { genre: 'asc' },
   });
   return rows.map(r => r.genre).filter(Boolean);
 }
 
-// ─── FEEDBACK RESPONSES ──────────────────────────────────────────────────────
+// 4. Get distinct genres present in the queue (for filter tabs)
+async function getQueueGenres() {
+  const rows = await prisma.feedbackSubmission.findMany({
+    where:    { status: "QUEUE", isDraft: false },
+    distinct: ['genre'],
+    orderBy:  { genre: 'asc' },
+  });
+  return rows.map(r => r.genre).filter(Boolean);
+}
+
+// 5. Fetch Queue — submissions waiting for their first critique (status = QUEUE)
+async function getQueueSubmissions({ page = 1, limit = 10, genre } = {}) {
+  const skip = (page - 1) * limit;
+  const baseWhere = { status: "QUEUE", isDraft: false };
+  const where = genre ? { AND: [baseWhere, { genre }] } : baseWhere;
+
+  const [items, total] = await Promise.all([
+    prisma.feedbackSubmission.findMany({
+      where,
+      include: submissionMeta,
+      orderBy: { createdAt: 'asc' }, // oldest first — FIFO queue
+      skip,
+      take: limit,
+    }),
+    prisma.feedbackSubmission.count({ where }),
+  ]);
+
+  return { items, total, page, pages: Math.ceil(total / limit) };
+}
+
+
 
 async function createResponse(criticId, submissionId, data) {
   const {
     generalFeedback,
+    tagResponses = {},   // optional: { [tagName]: feedbackString }
   } = data;
 
   if (!generalFeedback?.trim()) {
     throw new Error("General feedback cannot be empty.");
   }
-  validateGeneralFeedback(generalFeedback);
 
-  // Fetch submission to check status and tier
+  // Fetch submission to check status, tier, and feedbackWanted tags
   const submission = await prisma.feedbackSubmission.findUnique({
     where:   { id: submissionId },
     include: { user: { select: { id: true, username: true, email: true } } },
   });
 
   if (!submission)                    throw new Error("Submission not found.");
-  if (!submission.isOpen && !submission.isOutdated) throw new Error("This submission is no longer accepting feedback.");
+  if (submission.status === "ARCHIVE") throw new Error("This submission is no longer accepting feedback.");
   if (submission.userId === criticId) throw new Error("You cannot critique your own work.");
+
+  // Validate general feedback word count using the submission's tier
+  validateGeneralFeedback(generalFeedback, submission.wordCountTier);
 
   // Block check: submission author has blocked this critic, or critic has blocked author
   const blockedByAuthor = await isBlocked(submission.userId, criticId);
@@ -433,17 +547,33 @@ async function createResponse(criticId, submissionId, data) {
   const blockedAuthor = await isBlocked(criticId, submission.userId);
   if (blockedAuthor) throw new Error("You cannot critique a submission from someone you have blocked.");
 
-  // 1. CALCULATE POINTS (Full points for Spotlight, Half for Outdated)
-  const pointsAwarded = pointsService.calculateCritiquePoints(submission.wordCountTier, submission.isOutdated);
+  // Sanitise tagResponses: only keep keys that are actual feedbackWanted tags on this submission
+  const allowedTags = new Set(submission.feedbackWanted ?? []);
+  const sanitisedTagResponses = {};
+  for (const [tag, value] of Object.entries(tagResponses)) {
+    if (allowedTags.has(tag) && typeof value === "string" && value.trim()) {
+      sanitisedTagResponses[tag] = value.trim();
+    }
+  }
+
+  // Calculate critic's points — pass spotlightSince so the long-stay bonus can be applied
+  const pointsBreakdown = pointsService.calculateCritiquePoints(
+    submission.wordCountTier,
+    submission.status,
+    submission.status === "SPOTLIGHT" ? submission.updatedAt : null,
+  );
 
   const response = await prisma.$transaction(async (tx) => {
-    // 2. CREATE THE RESPONSE
+    // CREATE THE RESPONSE (with tagResponses stored as JSON)
     const resp = await tx.feedbackResponse.create({
       data: {
         submissionId,
         criticId,
         generalFeedback: generalFeedback.trim(),
-        pointsEarned: pointsAwarded, // Log exactly what they earned
+        tagResponses:    Object.keys(sanitisedTagResponses).length > 0
+                           ? sanitisedTagResponses
+                           : undefined,
+        pointsEarned: pointsBreakdown.totalPoints,
       },
       include: {
         critic: { select: userSelect },
@@ -451,44 +581,95 @@ async function createResponse(criticId, submissionId, data) {
       },
     });
 
-    // 3. AWARD THE CALCULATED POINTS
-    await pointsService.awardCritiquePoints(criticId, pointsAwarded, tx);
+    // AWARD CRITIC POINTS
+    await pointsService.awardCritiquePoints(criticId, pointsBreakdown.totalPoints, tx);
 
-    // 4. INCREMENT CRITIQUE COUNT
+    // INCREMENT CRITIQUE COUNT
     const updatedSub = await tx.feedbackSubmission.update({
       where: { id: submissionId },
       data: { critiqueCount: { increment: 1 } }
     });
 
-    // 5. ROTATE OUT OF SPOTLIGHT (If hits 3 critiques, mark as outdated and close)
-    if (updatedSub.critiqueCount >= 3 && !updatedSub.isOutdated) {
+    // STATUS TRANSITIONS
+    //    SPOTLIGHT → ARCHIVE when it hits 3 critiques, then promote oldest QUEUE item.
+    //    QUEUE submissions stay in QUEUE until a spotlight slot opens — FIFO, no conditions.
+    if (updatedSub.critiqueCount >= 3 && updatedSub.status !== "ARCHIVE") {
       await tx.feedbackSubmission.update({
         where: { id: submissionId },
-        data: { isOutdated: true, isOpen: false }
+        data:  { status: "ARCHIVE" },
       });
+
+      // A spotlight slot just freed up — pull in the next eligible chapter
+      // from QUEUE. FIFO order, but skip any author who still has another
+      // chapter in the spotlight; they'll be promoted once that one is done.
+      const spotlightedAuthorIds = (
+        await tx.feedbackSubmission.findMany({
+          where:  { status: "SPOTLIGHT", isDraft: false },
+          select: { userId: true },
+        })
+      ).map(s => s.userId);
+
+      const nextInLine = await tx.feedbackSubmission.findFirst({
+        where: {
+          status:  "QUEUE",
+          isDraft: false,
+          ...(spotlightedAuthorIds.length > 0 && {
+            userId: { notIn: spotlightedAuthorIds },
+          }),
+        },
+        orderBy: { createdAt: "asc" },
+      });
+
+      if (nextInLine) {
+        await tx.feedbackSubmission.update({
+          where: { id: nextInLine.id },
+          data:  { status: "SPOTLIGHT" },
+        });
+      }
     }
 
     return resp;
   });
 
-  return { ...response, submissionAuthor: submission.user, submissionTitle: submission.title };
+  return {
+    ...response,
+    submissionAuthor: submission.user,
+    submissionTitle:  submission.title,
+    pointsBreakdown,  // expose to controller so it can tell the critic about long-stay bonus
+  };
 }
 
 async function updateResponse(responseId, criticId, data) {
-  const response = await prisma.feedbackResponse.findUnique({ where: { id: responseId } });
+  const response = await prisma.feedbackResponse.findUnique({
+    where:   { id: responseId },
+    include: { submission: { select: { wordCountTier: true, feedbackWanted: true } } },
+  });
   if (!response)                      throw new Error("Response not found.");
   if (response.criticId !== criticId) throw new Error("Not authorised.");
 
-  const { generalFeedback } = data;
+  const { generalFeedback, tagResponses } = data;
 
   if (generalFeedback !== undefined) {
-    validateGeneralFeedback(generalFeedback);
+    validateGeneralFeedback(generalFeedback, response.submission.wordCountTier);
+  }
+
+  // Sanitise tagResponses if provided
+  let sanitisedTagResponses;
+  if (tagResponses !== undefined) {
+    const allowedTags = new Set(response.submission.feedbackWanted ?? []);
+    sanitisedTagResponses = {};
+    for (const [tag, value] of Object.entries(tagResponses)) {
+      if (allowedTags.has(tag) && typeof value === "string" && value.trim()) {
+        sanitisedTagResponses[tag] = value.trim();
+      }
+    }
   }
 
   return prisma.feedbackResponse.update({
     where: { id: responseId },
     data: {
-      ...(generalFeedback     !== undefined && { generalFeedback: generalFeedback.trim() }),
+      ...(generalFeedback      !== undefined && { generalFeedback: generalFeedback.trim() }),
+      ...(sanitisedTagResponses !== undefined && { tagResponses: sanitisedTagResponses }),
     },
   });
 }
@@ -499,9 +680,6 @@ async function toggleResponseUpvote(userId, responseId) {
     include: { submission: { select: { userId: true, title: true } } },
   });
   if (!response) throw new Error("Response not found.");
-  if (response.submission.userId !== userId) {
-    throw new Error("Only the submission author can upvote a critique.");
-  }
   if (response.criticId === userId) {
     throw new Error("You cannot upvote your own critique.");
   }
@@ -511,29 +689,33 @@ async function toggleResponseUpvote(userId, responseId) {
   });
 
   if (existing) {
-    await prisma.$transaction(async (tx) => {
-      await tx.feedbackResponseUpvote.delete({ where: { id: existing.id } });
-      await pointsService.reverseCritiqueUpvoteBonus(response.criticId, tx);
-    });
+    // Remove upvote and deduct the 2 reputation points previously awarded
+    await prisma.$transaction([
+      prisma.feedbackResponseUpvote.delete({ where: { id: existing.id } }),
+      prisma.feedbackPoint.upsert({
+        where:  { userId: response.criticId },
+        update: { reputation: { decrement: UPVOTE_REPUTATION_AWARD } },
+        create: { userId: response.criticId, postingBalance: 0, reputation: 0 },
+      }),
+    ]);
     return { upvoted: false };
   }
 
-  const walletBefore = await prisma.feedbackPoint.findUnique({ where: { userId: response.criticId } });
-
-  await prisma.$transaction(async (tx) => {
-    await tx.feedbackResponseUpvote.create({ data: { userId, responseId } });
-    await pointsService.awardCritiqueUpvoteBonus(response.criticId, tx);
-  });
-
-  const walletAfter = await prisma.feedbackPoint.findUnique({ where: { userId: response.criticId } });
+  // Add upvote and award +2 reputation to the critic (not posting points)
+  await prisma.$transaction([
+    prisma.feedbackResponseUpvote.create({ data: { userId, responseId } }),
+    prisma.feedbackPoint.upsert({
+      where:  { userId: response.criticId },
+      update: { reputation: { increment: UPVOTE_REPUTATION_AWARD } },
+      create: { userId: response.criticId, postingBalance: 0, reputation: UPVOTE_REPUTATION_AWARD },
+    }),
+  ]);
 
   return {
     upvoted:         true,
     criticId:        response.criticId,
     submissionId:    response.submissionId,
     submissionTitle: response.submission?.title,
-    walletBefore,
-    walletAfter,
   };
 }
 
@@ -555,7 +737,7 @@ async function createParagraphComment(authorId, submissionId, data) {
     include: { user: { select: { id: true, username: true, email: true } } },
   });
   if (!submission)        throw new Error("Submission not found.");
-  if (!submission.isOpen) throw new Error("This submission is no longer accepting feedback.");
+  if (submission.status === "ARCHIVE") throw new Error("This submission is no longer accepting feedback.");
 
   // Block check: submission author has blocked this commenter, or commenter has blocked author
   if (submission.user.id !== authorId) {
@@ -642,43 +824,12 @@ async function toggleParagraphCommentUpvote(userId, commentId) {
   });
 
   if (existing) {
-    await prisma.$transaction(async (tx) => {
-      await tx.paragraphCommentUpvote.delete({ where: { id: existing.id } });
-      const newTotal = await tx.paragraphCommentUpvote.count({ where: { commentId } });
-      await pointsService.checkAndReverseParagraphUpvoteMilestone(comment.authorId, newTotal, tx);
-    });
+    await prisma.paragraphCommentUpvote.delete({ where: { id: existing.id } });
     return { upvoted: false };
   }
 
-  const walletBefore = await prisma.feedbackPoint.findUnique({ where: { userId: comment.authorId } });
-  let milestoneResult = { awarded: false, pointsAwarded: 0 };
-
-  await prisma.$transaction(async (tx) => {
-    await tx.paragraphCommentUpvote.create({ data: { userId, commentId } });
-    const newTotal = await tx.paragraphCommentUpvote.count({ where: { commentId } });
-    milestoneResult = await pointsService.checkAndAwardParagraphUpvoteMilestone(
-      comment.authorId,
-      newTotal,
-      tx
-    );
-    milestoneResult.newTotal = newTotal;
-  });
-
-  if (milestoneResult.awarded) {
-    const walletAfter = await prisma.feedbackPoint.findUnique({ where: { userId: comment.authorId } });
-    return {
-      upvoted:         true,
-      ...milestoneResult,
-      commentAuthorId: comment.authorId,
-      submissionId:    comment.submission.id,
-      submissionTitle: comment.submission.title,
-      paragraphIndex:  comment.paragraphIndex,  // for notification message
-      walletBefore,
-      walletAfter,
-    };
-  }
-
-  return { upvoted: true, ...milestoneResult };
+  await prisma.paragraphCommentUpvote.create({ data: { userId, commentId } });
+  return { upvoted: true };
 }
 
 // ─── PARAGRAPH COMMENT REPLIES ───────────────────────────────────────────────
@@ -770,13 +921,13 @@ module.exports = {
   createSubmission,
   getSubmissions,
   getSubmissionById,
-  closeSubmission,
-  reopenSubmission,
   deleteSubmission,
   updateSubmission,
   getSpotlightSubmissions,
   getOutdatedSubmissions,
+  getQueueSubmissions,
   getArchiveGenres,
+  getQueueGenres,
   createResponse,
   updateResponse,
   toggleResponseUpvote,

@@ -737,7 +737,8 @@ async function createParagraphComment(authorId, submissionId, data) {
     include: { user: { select: { id: true, username: true, email: true } } },
   });
   if (!submission)        throw new Error("Submission not found.");
-  if (submission.status === "ARCHIVE") throw new Error("This submission is no longer accepting feedback.");
+  // Note: paragraph comments are intentionally allowed on ARCHIVE submissions.
+  // Full critiques (responses) are gated separately on the frontend via canCritique.
 
   // Block check: submission author has blocked this commenter, or commenter has blocked author
   if (submission.user.id !== authorId) {

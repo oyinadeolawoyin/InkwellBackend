@@ -115,10 +115,6 @@ async function fetchEventWinners(req, res) {
 
 // GET /api/events/admin/all
 async function fetchAllEvents(req, res) {
-  if (req.user.role !== "ADMIN") {
-    return res.status(403).json({ message: "Not authorized." });
-  }
-
   try {
     const events = await eventService.fetchAllEvents();
     res.status(200).json({ events });

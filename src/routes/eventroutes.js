@@ -19,6 +19,10 @@ function isAdmin(req, res, next) {
 // GET /api/events/active
 router.get("/active", eventController.fetchActiveEvents);
 
+// Full event list for the admin dashboard
+// GET /api/events/admin/all
+router.get("/all", eventController.fetchAllEvents);
+
 // Single event landing page
 // GET /api/events/:eventId
 router.get("/:eventId", eventController.fetchEventById);
@@ -36,10 +40,6 @@ router.get("/:eventId/communityStreak", eventController.getEventCommunityStreak)
 router.get("/:eventId/winners", eventController.fetchEventWinners);
 
 // ─── ADMIN ROUTES ─────────────────────────────────────────────
-
-// Full event list for the admin dashboard
-// GET /api/events/admin/all
-router.get("/all", authenticateJWT, eventController.fetchAllEvents);
 
 // Create a new event
 // POST /api/events/admin/create

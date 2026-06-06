@@ -45,9 +45,34 @@ async function getTopPracticeWriters(req, res) {
   }
 }
 
+// GET /api/leaderboard/members — full members page data in one shot
+async function getMembersPageData(req, res) {
+  try {
+    const data = await leaderboardService.getMembersPageData();
+    res.status(200).json(data);
+  } catch (error) {
+    console.error("getMembersPageData error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// GET /api/leaderboard/members/search?q=username
+async function searchMembers(req, res) {
+  try {
+    const query = req.query.q || "";
+    const results = await leaderboardService.searchMembers(query);
+    res.status(200).json({ results });
+  } catch (error) {
+    console.error("searchMembers error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
 module.exports = {
   getHomepageLeaderboards,
   getTopCritiquers,
   getTopSprinters,
   getTopPracticeWriters,
+  getMembersPageData,
+  searchMembers,
 };

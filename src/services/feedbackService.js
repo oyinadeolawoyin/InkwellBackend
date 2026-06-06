@@ -388,9 +388,9 @@ async function getSpotlightSubmissions() {
   const currentSpotlightCount = await prisma.feedbackSubmission.count({
     where: { status: "SPOTLIGHT", isDraft: false },
   });
-
+ 
   const slotsToFill = 7 - currentSpotlightCount;
-
+ 
   if (slotsToFill > 0) {
     // Collect authors already occupying a spotlight slot so we don't
     // give them a second one while they still have a chapter there.
@@ -400,7 +400,7 @@ async function getSpotlightSubmissions() {
         select: { userId: true },
       })
     ).map(s => s.userId);
-
+ 
     // Pick the oldest QUEUE chapters whose authors aren't already spotlighted,
     // one per author (deduplicate in JS after the DB fetch).
     const queueCandidates = await prisma.feedbackSubmission.findMany({
@@ -415,10 +415,10 @@ async function getSpotlightSubmissions() {
       // Fetch more than needed so we can deduplicate per-author in JS
       take: slotsToFill * 5,
     });
-
+ 
     // One chapter per author, oldest first, up to slotsToFill
     const seenAuthors = new Set();
-    const nextInLine = [];
+    const nextInLine  = [];
     for (const s of queueCandidates) {
       if (!seenAuthors.has(s.userId)) {
         seenAuthors.add(s.userId);
@@ -426,7 +426,7 @@ async function getSpotlightSubmissions() {
       }
       if (nextInLine.length === slotsToFill) break;
     }
-
+ 
     if (nextInLine.length > 0) {
       await prisma.feedbackSubmission.updateMany({
         where: { id: { in: nextInLine.map(s => s.id) } },
@@ -434,16 +434,16 @@ async function getSpotlightSubmissions() {
       });
     }
   }
-
+ 
   // Now fetch the updated spotlight
   const candidates = await prisma.feedbackSubmission.findMany({
     where:   { status: "SPOTLIGHT", isDraft: false },
     include: submissionMeta,
     orderBy: { createdAt: "asc" },
   });
-
+ 
   // Keep only the single oldest submission per user
-  const seen = new Set();
+  const seen    = new Set();
   const deduped = [];
   for (const sub of candidates) {
     if (!seen.has(sub.userId)) {
@@ -452,8 +452,20 @@ async function getSpotlightSubmissions() {
     }
     if (deduped.length === 6) break;
   }
-
-  return deduped;
+ 
+  // ── Attach isLongStay: true when the submission has been in the spotlight
+  //    for more than 10 days. We use updatedAt (last status change) so that
+  //    a chapter promoted from QUEUE counts from its promotion date, falling
+  //    back to createdAt when updatedAt is unavailable.
+  const TEN_DAYS_MS = 10 * 24 * 60 * 60 * 1000;
+  const now         = Date.now();
+ 
+  return deduped.map(sub => {
+    const since      = sub.updatedAt ?? sub.createdAt;
+    const ageMs      = since ? now - new Date(since).getTime() : 0;
+    const isLongStay = ageMs > TEN_DAYS_MS;
+    return { ...sub, isLongStay };
+  });
 }
 
 // 2. Fetch Outdated (Archive) — supports optional genre filter

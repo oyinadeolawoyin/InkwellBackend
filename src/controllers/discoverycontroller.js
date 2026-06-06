@@ -196,7 +196,7 @@ async function approveStory(req, res) {
       notifyUser(
         author,
         `Your story "${existing.title}" has been approved and is now live on the Discovery page!`,
-        `/discovery/${storyId}`, "discovery_story_approved"
+        `/stories/${storyId}`, "discovery_story_approved"
       );
     }
 
@@ -209,7 +209,7 @@ async function approveStory(req, res) {
         });
 
         const message = `A new story has been added to the Discovery page: "${existing.title}" by ${existing.authorName}.`;
-        const link = `/discovery/${storyId}`;
+        const link = `/stories/${storyId}`;
 
         await Promise.allSettled(
           users
@@ -274,7 +274,7 @@ async function toggleLike(req, res) {
           await notifyUser(
             author,
             `${liker.username} liked your story "${story.title}".`,
-            `/discovery/${storyId}`, "discovery_story_liked"
+            `/stories/${storyId}`, "discovery_story_liked"
           );
         } catch (err) {
           console.error("Like notification error:", err);

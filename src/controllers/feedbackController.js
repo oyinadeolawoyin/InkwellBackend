@@ -47,7 +47,7 @@ async function createSubmission(req, res) {
     feedbackService.getAllUsersExcept(req.user.id)
       .then((users) => {
         const message = `${submission.user.username} posted a new submission: "${submission.title}"`;
-        const link    = `/feedback/${submission.id}`;
+        const link    = `/critique/${submission.id}`;
         users.forEach((user) => notifyUser(user, message, link, "feedback_new_submission").catch(() => {}));
       })
       .catch(() => {});
@@ -199,7 +199,7 @@ async function createResponse(req, res) {
     const { submissionAuthor, submissionTitle, ...responseData } = response;
     if (submissionAuthor && submissionAuthor.id !== req.user.id) {
       const message = `${req.user.username ?? "Someone"} left a critique on your submission: "${submissionTitle ?? ""}"`;
-      const link    = `/feedback/${req.params.id}#critique-${response.id}`;
+      const link    = `/critique/${req.params.id}#critique-${response.id}`;
       notifyUser(submissionAuthor, message, link, "feedback_critique_received").catch(() => {});
     }
 
@@ -236,7 +236,7 @@ async function toggleResponseUpvote(req, res) {
         feedbackService.getUserById(result.criticId).then((critic) => {
           if (!critic) return;
           const message = `${req.user.username ?? "Someone"} upvoted your critique on "${result.submissionTitle ?? "a submission"}"`;
-          const link    = `/feedback/${result.submissionId}#critique-${req.params.responseId}`;
+          const link    = `/critique/${result.submissionId}#critique-${req.params.responseId}`;
           notifyUser(critic, message, link).catch(() => {});
         }).catch(() => {});
       }
@@ -280,7 +280,7 @@ async function createParagraphComment(req, res) {
     const { submissionAuthor, submissionTitle, commenterName, ...commentData } = comment;
     if (submissionAuthor && submissionAuthor.id !== req.user.id) {
       const message = `${commenterName} commented on paragraph ${req.body.paragraphIndex + 1} of your submission: "${submissionTitle ?? ""}"`;
-      const link    = `/feedback/${req.params.id}#paragraph-${req.body.paragraphIndex + 1}`;
+      const link    = `/critique/${req.params.id}#paragraph-${req.body.paragraphIndex + 1}`;
       notifyUser(submissionAuthor, message, link, "feedback_paragraph_comment").catch(() => {});
     }
 
@@ -345,7 +345,7 @@ async function toggleParagraphCommentUpvote(req, res) {
           if (!commentAuthor) return;
           const paraLabel = typeof result.paragraphIndex === "number" ? ` on paragraph ${result.paragraphIndex + 1}` : "";
           const message = `Your comment${paraLabel} in "${result.submissionTitle ?? "a submission"}" reached ${result.newTotal} upvotes — you earned ${result.pointsAwarded} points!`;
-          const link    = `/feedback/${result.submissionId}`;
+          const link    = `/critique/${result.submissionId}`;
           notifyUser(commentAuthor, message, link).catch(() => {});
         }).catch(() => {});
       }
@@ -388,7 +388,7 @@ async function createParagraphCommentReply(req, res) {
     if (commentAuthor && commentAuthor.id !== req.user.id) {
       const paraLabel = typeof paragraphIndex === "number" ? ` on paragraph ${paragraphIndex + 1}` : "";
       const message = `${replierName} replied to your comment${paraLabel} in "${submissionTitle ?? "a submission"}"`;
-      const link    = typeof paragraphIndex === "number" ? `/feedback/${submissionId}#paragraph-${paragraphIndex + 1}` : `/feedback/${submissionId}`;
+      const link    = typeof paragraphIndex === "number" ? `/critique/${submissionId}#paragraph-${paragraphIndex + 1}` : `/critique/${submissionId}`;
       notifyUser(commentAuthor, message, link, "feedback_paragraph_reply").catch(() => {});
     }
 

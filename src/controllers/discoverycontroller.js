@@ -54,7 +54,7 @@ async function createStory(req, res) {
         "title, genre, synopsis, firstChapter, authorName, platform, and platformLink are required.",
     });
   }
-  console.log("firstchap", firstChapterTitle, "warn", rawWarnings);
+  
   try {
     let coverUrl = null;
     if (req.file) {
@@ -202,24 +202,24 @@ async function approveStory(req, res) {
 
     // ── Notify all other users about the new story drop ───────────────────
     // Fire-and-forget so the response isn't delayed.
-    (async () => {
-      try {
-        const users = await prisma.user.findMany({
-          select: { id: true, username: true, email: true },
-        });
+    // (async () => {
+    //   try {
+    //     const users = await prisma.user.findMany({
+    //       select: { id: true, username: true, email: true },
+    //     });
 
-        const message = `A new story has been added to the Discovery page: "${existing.title}" by ${existing.authorName}.`;
-        const link = `/stories/${storyId}`;
+    //     const message = `A new story has been added to the Discovery page: "${existing.title}" by ${existing.authorName}.`;
+    //     const link = `/stories/${storyId}`;
 
-        await Promise.allSettled(
-          users
-            .filter((u) => u.id !== existing.userId) // author already notified above
-            .map((u) => notifyUser(u, message, link, "discovery_new_story"))
-        );
-      } catch (err) {
-        console.error("Discovery approval broadcast error:", err);
-      }
-    })();
+    //     await Promise.allSettled(
+    //       users
+    //         .filter((u) => u.id !== existing.userId) // author already notified above
+    //         .map((u) => notifyUser(u, message, link, "discovery_new_story"))
+    //     );
+    //   } catch (err) {
+    //     console.error("Discovery approval broadcast error:", err);
+    //   }
+    // })();
 
     res.status(200).json({ story });
   } catch (error) {

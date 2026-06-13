@@ -91,8 +91,7 @@ async function fetchGroupSprint(groupSprintId) {
           user: { select: { id: true, username: true, avatar: true, discordId: true } },
           soundscape: {
             select: { id: true, name: true, fileUrl: true, creatorName: true }
-          },
-          project: { select: { id: true, title: true } }
+          }
         }
       },
       _count: { select: { sprints: true } },
@@ -165,13 +164,11 @@ async function joinSprint(userId, groupSprintId, checkin, startWords, soundscape
       checkin,
       startWords: startWords || 0,
       soundscapeId: soundscapeId || null,
-      projectId: projectId || null,
     },
     include: {
       soundscape: {
         select: { id: true, name: true, fileUrl: true, creatorName: true }
-      },
-      project: { select: { id: true, title: true } }
+      }
     }
   });
 }
@@ -206,32 +203,6 @@ async function checkoutSprint(sprintId, currentWordCount) {
     });
   }
 
-  // ── Auto-log words to linked project ──────────────────────
-  // Only log if this was a writing sprint and words were actually written
-  if (existing.projectId && wordsWritten > 0) {
-    // Verify the project belongs to this user before writing
-    const project = await prisma.project.findFirst({
-      where: { id: existing.projectId, userId: existing.userId },
-      select: { id: true, currentWordCount: true }
-    });
-
-    if (project) {
-      await prisma.$transaction([
-        prisma.project.update({
-          where: { id: project.id },
-          data: { currentWordCount: { increment: wordsWritten } }
-        }),
-        prisma.projectWordLog.create({
-          data: {
-            projectId: project.id,
-            userId: existing.userId,
-            wordsAdded: wordsWritten,
-          }
-        })
-      ]);
-    }
-  }
-
   return sprint;
 }
 
@@ -242,8 +213,7 @@ async function fetchLoginUserSprint(userId) {
       user: { select: { id: true, username: true, avatar: true } },
       soundscape: {
         select: { id: true, name: true, fileUrl: true, creatorName: true }
-      },
-      project: { select: { id: true, title: true } }
+      }
     }
   });
 }

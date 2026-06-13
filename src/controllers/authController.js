@@ -36,7 +36,7 @@ async function signup(req, res) {
     return res.status(400).json({ message: errorMessages });
   }
 
-  const { username, password, email, timezone } = req.body;
+  const { username, password, email, timezone, referralSource } = req.body;
 
   try {
     const existingEmail = await authService.findUserByEmail(email);
@@ -59,6 +59,7 @@ async function signup(req, res) {
       password: hashedPassword,
       email,
       timezone,
+      referralSource: referralSource || null,
       role: isPremiumEligible ? "FOUNDING_WRITER" : "USER",
     });
 

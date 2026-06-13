@@ -17,8 +17,14 @@ function errStatus(msg) {
 
 async function getMyWallet(req, res) {
   try {
-    const wallet = await pointsService.getWallet(req.user.id);
-    res.json(wallet);
+    const [wallet, critiqueGiven] = await Promise.all([
+      pointsService.getWallet(req.user.id),
+      // Count how many critiques (FeedbackResponse rows) this user has written
+      require("../config/prismaClient").feedbackResponse.count({
+        where: { criticId: req.user.id },
+      }),
+    ]);
+    res.json({ ...wallet, critiqueGiven });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

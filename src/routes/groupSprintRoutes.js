@@ -12,11 +12,6 @@ function requireBotSecret(req, res, next) {
   next();
 }
 
-// ─── Bot routes — no JWT, secret only ────────────────────────
-router.post("/bot/startGroupSprint", requireBotSecret, groupSprintController.startGroupSprint);
-router.post("/bot/join", requireBotSecret, groupSprintController.botJoinSprint);
-router.get("/bot/:groupSprintId", requireBotSecret, groupSprintController.fetchGroupSprint); // 👈 needed by notifyService
-
 // ─── GROUP SPRINT ─────────────────────────────────────────────
 router.get("/activeGroupSprints", groupSprintController.fetchAllActiveGroupSprints);
 router.get("/lastGroupSprint", groupSprintController.fetchLastGroupSprint);

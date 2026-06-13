@@ -1,7 +1,6 @@
 // src/controllers/emotionController.js
 const emotionService = require("../services/emotionService");
 const { publishDailyEmotion } = require("../../jobs/emotioncron.job");
-const { embedLength } = require("discord.js");
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 

@@ -31,15 +31,20 @@ model User {
   isDeleted        Boolean   @default(false)
   deletedAt        DateTime?
 
+  referralSource   String?   // "how did you find us" answer at signup
+  socialLinks      Json?     // [{ platform: "Twitter", url: "https://..." }, ...]
+
+  challengeLongestStreak   Int     @default(0)  
+
   // ── existing relations ──────────────────────────────────────────────────
+  challengeParticipations  ChallengeParticipation[]
+  challengeCheckIns        ChallengeCheckIn[]
+
   notificationPreference NotificationPreference?
   sprintReminderOptIn    SprintReminderOptIn?  
   groupSprints        GroupSprint[]
   sprints             Sprint[]
   notification        Notification[]
-  projects            Project[]
-  todolists           Todolist[]
-  notes               Note[]
   blogPostLikes       BlogPostLike[]
   blogComments        BlogComment[]
   blogReplies         BlogReply[]
@@ -71,9 +76,6 @@ model User {
   discoveryStories            DiscoveryStory[]
   discoveryLikes              DiscoveryLike[]
 
-  // ── event winners ───────────────────────────────────────────────────────
-  eventWins                   EventWinner[]
-
   // ── emotion relations ────────────────────────────────────────────────────
   emotionLikes                EmotionLike[]
   emotionComments             EmotionComment[]
@@ -81,6 +83,14 @@ model User {
 
   blocksMade      UserBlock[]  @relation("BlocksMade")
   blocksReceived  UserBlock[]  @relation("BlocksReceived")
+
+  // ── thread relations ─────────────────────────────────────────────────────
+  threads             Thread[]
+  threadLikes         ThreadLike[]
+  threadComments      ThreadComment[]
+  threadCommentLikes  ThreadCommentLike[]
+  threadReplies       ThreadReply[]
+  threadReplyLikes    ThreadReplyLike[]
 }
 
 model UserBlock {
@@ -97,233 +107,52 @@ model UserBlock {
   @@index([blockedId])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PLATFORM EVENTS  (carousel notices + days challenges)
-// ─────────────────────────────────────────────────────────────────────────────
-model PlatformEvent {
-  id          Int          @id @default(autoincrement())
-  title       String
-  description String
-  bannerUrl   String?                     // optional hero image for the carousel card
-  type        EventType
-  // For DAYS_CHALLENGE: how many consecutive days writers must maintain
-  daysTarget  Int?
-  startDate   DateTime
-  endDate     DateTime
-  isActive    Boolean      @default(true)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-
-  // Projects currently enrolled in this event (public + streak still alive)
-  entries     ProjectEventEntry[]
-
-  // Winners recorded after the event ends
-  winners     EventWinner[]
-
+model ChallengeParticipation {
+  id               Int           @id @default(autoincrement())
+  userId           Int           @unique   // one active slot per writer at a time (enforced in service)
+ 
+  // Goal the writer set when they joined
+  goalValue        Int         @default(0) // e.g. 500 (words), 2 (chapters), 3 (scenes), 30 (minutes)
+  goalType         GoalType    @default(WORDS)  // WORDS | CHAPTERS | SCENES | DURATION
+ 
+  // Streak tracking
+  currentStreak    Int           @default(0)
+  longestStreak    Int           @default(0)   // local copy for leaderboard queries
+  missedDaysInRow  Int           @default(0)
+  lastCheckInDate  DateTime?
+ 
+  joinedAt         DateTime      @default(now())
+  isActive         Boolean       @default(true)
+  remindersEnabled Boolean       @default(true)
+ 
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checkIns  ChallengeCheckIn[]
+ 
+  @@index([userId])
   @@index([isActive])
-  @@index([type])
-  @@index([startDate, endDate])
+  @@index([currentStreak])
+  @@index([joinedAt])
 }
 
-// Join table: a public project opts into a DAYS_CHALLENGE event.
-// Row is soft-deleted (disqualified = true) when the streak resets,
-// which also triggers the project visibility flip to PRIVATE in the service.
-model ProjectEventEntry {
-  id              Int           @id @default(autoincrement())
-  projectId       Int
-  eventId         Int
-  enrolledAt      DateTime      @default(now())
-  disqualified    Boolean       @default(false)
-  disqualifiedAt  DateTime?
-
-  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  event           PlatformEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
-
-  // one entry per project per event
-  @@unique([projectId, eventId])
-  @@index([eventId])
-  @@index([projectId])
-  @@index([disqualified])
-}
-
-model EventWinner {
-  id              Int           @id @default(autoincrement())
-  eventId         Int
-  userId          Int
-  projectId       Int
-  projectTitle    String        // snapshot — project title at time of win
-  username        String        // snapshot — in case username ever changes
-  avatar          String?       // snapshot
-  finalStreak     Int           // how many days they maintained
-  totalWords      Int           @default(0)
-  totalChapters   Int           @default(0)
-  totalScenes     Int           @default(0)
-  totalMinutes    Int           @default(0)
-  challengeRole   ChallengeRole // the badge/role awarded
-  createdAt       DateTime      @default(now())
-
-  event           PlatformEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([eventId, userId])   // one winner record per user per event
-  @@index([eventId])
-  @@index([userId])
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PROJECT
-// ─────────────────────────────────────────────────────────────────────────────
-
-model Project {
-  id               Int       @id @default(autoincrement())
-  userId           Int
-  title            String
-  description      String?
-  link             String?
-  genre            String?
-  visibility       Visibility    @default(PRIVATE)
-
-  // ── Writing phase ──────────────────────────────────────────────────────
-  phase            WritingPhase  @default(DRAFTING)
-
-  // ── Word / chapter / scene targets ────────────────────────────────────
-  targetWordCount  Int?
-  currentWordCount Int        @default(0)
-  targetChapters   Int?
-  currentChapters  Int        @default(0)
-  targetScenes     Int?
-  currentScenes    Int        @default(0)
-
-  // ── Session goal ───────────────────────────────────────────────────────
-  sessionGoalType     SessionGoalType?
-  sessionGoalCount    Int?
-  currentSessionCount Int    @default(0)
-  lastSessionReset    DateTime?
-
-  // ── Consecutive-days streak tracker ───────────────────────────────────
-  consecutiveDaysTarget Int?
-  currentStreak         Int       @default(0)
-  lastLogDate           DateTime?
-
-  // ── Deadline / schedule ────────────────────────────────────────────────
-  deadline         DateTime?
-  daysPerWeek      Int           @default(5)
-  status           ProjectStatus @default(IN_PROGRESS)
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  wordLogs         ProjectWordLog[]
-  progressLogs     ProjectProgressLog[]
-  sessionLogs      ProjectSessionLog[]
-  dayLogs          ProjectDayLog[]
-  todolists        Todolist[]
-  notes            Note[]
-  sprints          Sprint[]
-  eventEntries     ProjectEventEntry[]
-
-  @@index([userId])
-  @@index([visibility])
-}
-
-// ─── Day Log (streak system) ──────────────────────────────────────────────────
-model ProjectDayLog {
-  id             Int      @id @default(autoincrement())
-  projectId      Int
-  userId         Int
-  logDate        DateTime
-  wordsLogged    Int      @default(0)
-  chaptersLogged Int      @default(0)
-  scenesLogged   Int      @default(0)
-  minutesLogged  Int      @default(0)
-  streakAtLog    Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@unique([projectId, logDate])
-  @@index([projectId])
-  @@index([userId])
-  @@index([logDate])
-}
-
-model ProjectWordLog {
-  id          Int      @id @default(autoincrement())
-  projectId   Int
-  userId      Int
-  wordsAdded  Int
-  loggedAt    DateTime @default(now())
-
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@index([projectId])
-  @@index([loggedAt])
-}
-
-model ProjectProgressLog {
-  id             Int      @id @default(autoincrement())
-  projectId      Int
-  userId         Int
-  chaptersAdded  Int      @default(0)
-  scenesAdded    Int      @default(0)
-  loggedAt       DateTime @default(now())
-
-  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@index([projectId])
-  @@index([loggedAt])
-}
-
-model ProjectSessionLog {
+// One row per day a writer logs progress in a challenge.
+model ChallengeCheckIn {
   id              Int      @id @default(autoincrement())
-  projectId       Int
+  participationId Int
   userId          Int
-  loggedAt        DateTime @default(now())
-  wordsWritten    Int?
-  chaptersWritten Int?
-  scenesWritten   Int?
-  minutesWritten  Int?
+  checkInDate     DateTime                       // the calendar date (stored as midnight UTC)
+  countLogged     Int                            // words or chapters logged for this day
+  metDailyGoal    Boolean  @default(false)       // true if countLogged >= participation.dailyGoal
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  participation  ChallengeParticipation  @relation(fields: [participationId], references: [id], onDelete: Cascade)
+  user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([projectId])
-  @@index([loggedAt])
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TODOLIST & NOTES
-// ─────────────────────────────────────────────────────────────────────────────
-
-model Todolist {
-  id           Int      @id @default(autoincrement())
-  task         String
-  index        Int
-  markComplete Boolean  @default(false)
-  projectId    Int
-  userId       Int
-  createdAt    DateTime @default(now())
-
-  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([projectId])
-  @@index([index])
-}
-
-model Note {
-  id        Int      @id @default(autoincrement())
-  title     String?
-  note      String
-  projectId Int
-  userId    Int
-  createdAt DateTime @default(now())
-
-  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([projectId])
-  @@index([createdAt])
+  // Only one check-in entry per participation per day
+  @@unique([participationId, checkInDate])
+  @@index([participationId])
+  @@index([userId])
+  @@index([checkInDate])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -368,7 +197,6 @@ model Sprint {
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   groupSprint   GroupSprint? @relation(fields: [groupSprintId], references: [id], onDelete: SetNull)
   soundscape    Soundscape?  @relation(fields: [soundscapeId], references: [id], onDelete: SetNull)
-  project       Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([groupSprintId])
@@ -594,6 +422,105 @@ model BlogReply {
 
   @@index([commentId])
   @@index([authorId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THREADS  (admin-created forum posts; members like, comment, reply)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Thread {
+  id        Int      @id @default(autoincrement())
+  authorId  Int                                         // always an ADMIN — enforced in service
+  title     String
+  context   String                                      // the body / "what this post is about"
+  mediaUrl  String?                                     // optional image/attachment
+  isPinned  Boolean  @default(false)                    // admins can pin important threads
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author    User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  likes     ThreadLike[]
+  comments  ThreadComment[]
+
+  @@index([authorId])
+  @@index([createdAt])
+  @@index([isPinned])
+}
+
+model ThreadLike {
+  id       Int    @id @default(autoincrement())
+  userId   Int
+  threadId Int
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, threadId])
+  @@index([threadId])
+}
+
+model ThreadComment {
+  id        Int      @id @default(autoincrement())
+  threadId  Int
+  authorId  Int?  // nullable — preserved if user deleted
+  mediaUrl   String?
+  mediaUrls  Json    @default("[]")                               
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  thread  Thread              @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  author  User?               @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  likes   ThreadCommentLike[]
+  replies ThreadReply[]
+
+  @@index([threadId])
+  @@index([authorId])
+}
+
+model ThreadCommentLike {
+  id        Int           @id @default(autoincrement())
+  userId    Int
+  commentId Int
+  createdAt DateTime      @default(now())
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment ThreadComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, commentId])
+  @@index([commentId])
+}
+
+model ThreadReply {
+  id        Int      @id @default(autoincrement())
+  commentId Int
+  authorId  Int?    // nullable — preserved if user deleted
+  content   String
+  mediaUrl   String?
+  mediaUrls   Json    @default("[]")                                      
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  comment ThreadComment    @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  author  User?            @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  likes   ThreadReplyLike[]
+
+  @@index([commentId])
+  @@index([authorId])
+}
+
+model ThreadReplyLike {
+  id        Int         @id @default(autoincrement())
+  userId    Int
+  replyId   Int
+  createdAt DateTime    @default(now())
+
+  user  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reply ThreadReply @relation(fields: [replyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, replyId])
+  @@index([replyId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -967,13 +894,6 @@ enum Role {
 enum SnippetSource {
   POST_SPRINT
   STANDALONE
-  DAYS_CHALLENGE 
-}
-
-enum SessionGoalType {
-  DAILY
-  WEEKLY
-  MONTHLY
 }
 
 enum Visibility {
@@ -984,13 +904,6 @@ enum Visibility {
 enum SprintType {
   WRITING
   READING
-}
-
-enum ProjectStatus {
-  IN_PROGRESS
-  COMPLETED
-  ON_HOLD
-  ABANDONED
 }
 
 enum DraftStage {
@@ -1013,28 +926,15 @@ enum WordCountTier {
   TIER_5000  // ≤5,000 words — costs/earns 5 pts
 }
 
-enum WritingPhase {
-  BRAINSTORMING
-  OUTLINING
-  DRAFTING
-  EDITING
-}
-
-enum EventType {
-  ANNOUNCEMENT
-  DAYS_CHALLENGE
-  WORKSHOP
-  OTHER
-}
-
-enum ChallengeRole {
-  STREAK_KEEPER
-  CHAMPION
-  IRON_PEN
-}
-
 enum ReportStatus {
   PENDING
   RESOLVED
   DISMISSED
+}
+
+enum GoalType {
+  WORDS
+  CHAPTERS
+  SCENES
+  DURATION   // stored in minutes
 }

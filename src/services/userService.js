@@ -36,6 +36,7 @@ async function createUser({
     password, 
     email, 
     timezone,
+    referralSource,
     role 
   }) {
     return await prisma.user.create({
@@ -44,6 +45,7 @@ async function createUser({
         password,
         email,
         timezone: timezone?.trim(),
+        referralSource: referralSource || null,
         role: role || "USER" 
       }
     });
@@ -56,6 +58,7 @@ async function updateUser({
   bio,
   avatar,
   dateOfBirth,
+  socialLinks,
 }) {
   const existingUser = await prisma.user.findUnique({
     where: { id: userId },
@@ -79,6 +82,7 @@ async function updateUser({
   if (bio          !== undefined) data.bio         = bio;
   if (avatar       !== undefined) data.avatar      = avatar;
   if (dateOfBirth  !== undefined) data.dateOfBirth = dateOfBirth ? new Date(dateOfBirth) : null;
+  if (socialLinks  !== undefined) data.socialLinks = socialLinks;
 
   return prisma.user.update({
     where: { id: userId },
@@ -122,6 +126,7 @@ async function fetchUser(userId) {
       role: true,
       createdAt: true,
       isDeleted: true,
+      socialLinks: true,
     }
   });
 }

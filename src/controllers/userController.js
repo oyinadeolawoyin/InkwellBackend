@@ -43,6 +43,33 @@ async function updateUser(req, res) {
       }
     }
 
+    // Parse and validate social links (up to 2, each needs platform + valid url)
+    let socialLinks;
+    if (req.body.socialLinks !== undefined) {
+      try {
+        const parsed = typeof req.body.socialLinks === "string"
+          ? JSON.parse(req.body.socialLinks)
+          : req.body.socialLinks;
+
+        if (!Array.isArray(parsed)) throw new Error();
+
+        const urlRegex = /^https?:\/\/.+/i;
+        const cleaned = parsed
+          .slice(0, 2)
+          .filter(l => l.platform?.trim() && l.url?.trim())
+          .map(l => ({ platform: l.platform.trim(), url: l.url.trim() }));
+
+        for (const link of cleaned) {
+          if (!urlRegex.test(link.url)) {
+            return res.status(400).json({ message: `"${link.url}" is not a valid URL. It must start with http:// or https://` });
+          }
+        }
+        socialLinks = cleaned;
+      } catch {
+        return res.status(400).json({ message: "Invalid social links format." });
+      }
+    }
+
     // Get current user
     const existingUser = await userService.fetchUser(userId);
 
@@ -63,6 +90,7 @@ async function updateUser(req, res) {
     if (bio         !== undefined) updateData.bio         = bio;
     if (avatar)                    updateData.avatar      = avatar;
     if (dateOfBirth !== undefined) updateData.dateOfBirth = dateOfBirth || null;
+    if (socialLinks !== undefined) updateData.socialLinks = socialLinks;
 
     const user = await userService.updateUser(updateData);
 

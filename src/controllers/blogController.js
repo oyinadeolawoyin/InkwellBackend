@@ -21,14 +21,14 @@ async function createPost(req, res) {
     const post = await blogService.createPost({ title, content, mediaUrl, link });
     res.status(201).json({ post });
 
-    // Notify all users about the new blog post (fire and forget)
-    blogService.getAllUsers().then((users) => {
-      const link = `/blog/${post.id}`;
-      const postTitle = post.title ? `"${post.title}"` : "a new blog post";
-      users.forEach((user) =>
-        notifyUser(user, `A new blog post has been published: ${postTitle}`, link, "blog_new_post").catch(() => {})
-      );
-    }).catch(() => {});
+    // // Notify all users about the new blog post (fire and forget)
+    // blogService.getAllUsers().then((users) => {
+    //   const link = `/blog/${post.id}`;
+    //   const postTitle = post.title ? `"${post.title}"` : "a new blog post";
+    //   users.forEach((user) =>
+    //     notifyUser(user, `A new blog post has been published: ${postTitle}`, link, "blog_new_post").catch(() => {})
+    //   );
+    // }).catch(() => {});
   } catch (error) {
     console.error("Create blog post error:", error);
     res.status(500).json({ message: "Something went wrong. Please try again later." });

@@ -49,26 +49,6 @@ async function publishDailyEmotion() {
   });
 
   console.log(`[EmotionCron] Published: ${entry.emotion} (template #${nextSortOrder})`);
-
-  // Notify all users who accept emotion_new notifications
-  // Fetch users who have push/inbox/email enabled for emotion_new
-  const users = await prisma.user.findMany({
-    where: { isDeleted: false },
-    select: { id: true, username: true, email: true },
-  });
-
-  const link    = '/emotions/practice'; // adjust to your frontend route
-  const message = `Today's emotion is "${entry.emotion}" — write a practice sentence!`;
-
-  for (const user of users) {
-    try {
-      await notifyUser(user, message, link, 'emotion_new');
-    } catch (err) {
-      console.error(`[EmotionCron] Failed to notify user ${user.id}:`, err.message);
-    }
-  }
-
-  console.log(`[EmotionCron] Notified ${users.length} users.`);
 }
 
 // Schedule: every day at midnight UTC

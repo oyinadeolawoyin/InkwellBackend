@@ -2,6 +2,20 @@ const blogService = require("../services/blogService");
 const { uploadFile, deleteFile } = require("../utilis/fileUploader");
 const { notifyUser } = require("../services/notificationService");
 
+// ─── Inline image upload (for rich-text editor content) ───────────────────────
+
+async function uploadImage(req, res) {
+  if (!req.file) return res.status(400).json({ message: "No file provided." });
+
+  try {
+    const url = await uploadFile(req.file);
+    res.status(200).json({ url });
+  } catch (error) {
+    console.error("Inline image upload error:", error);
+    res.status(500).json({ message: "Upload failed. Please try again." });
+  }
+}
+
 // ─── Posts (Admin only for mutations) ────────────────────────────────────────
 
 async function createPost(req, res) {
@@ -9,7 +23,7 @@ async function createPost(req, res) {
     return res.status(403).json({ message: "Admin access required." });
   }
 
-  const { title, content, link } = req.body;
+  const { title, content, link, seriesId, seriesOrder, category } = req.body;
   if (!content) return res.status(400).json({ message: "Content is required." });
 
   try {
@@ -18,7 +32,27 @@ async function createPost(req, res) {
       mediaUrl = await uploadFile(req.file);
     }
 
-    const post = await blogService.createPost({ title, content, mediaUrl, link });
+    let resolvedSeriesId = null;
+    if (seriesId !== undefined && seriesId !== null && seriesId !== "") {
+      resolvedSeriesId = Number(seriesId);
+      const series = await blogService.findSeries(resolvedSeriesId);
+      if (!series) return res.status(404).json({ message: "Series not found." });
+    }
+
+    const resolvedSeriesOrder =
+      seriesOrder !== undefined && seriesOrder !== null && seriesOrder !== ""
+        ? Number(seriesOrder)
+        : undefined;
+
+    const post = await blogService.createPost({
+      title,
+      content,
+      mediaUrl,
+      link,
+      seriesId: resolvedSeriesId,
+      seriesOrder: resolvedSeriesOrder,
+      category: category || null,
+    });
     res.status(201).json({ post });
 
     // // Notify all users about the new blog post (fire and forget)
@@ -38,9 +72,10 @@ async function createPost(req, res) {
 async function getPosts(req, res) {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
+  const category = req.query.category || undefined;
 
   try {
-    const result = await blogService.getPosts({ page, limit });
+    const result = await blogService.getPosts({ page, limit, category });
     res.status(200).json(result);
   } catch (error) {
     console.error("Get blog posts error:", error);
@@ -67,7 +102,7 @@ async function updatePost(req, res) {
   }
 
   const postId = Number(req.params.postId);
-  const { title, content, link } = req.body;
+  const { title, content, link, seriesId, seriesOrder, category } = req.body;
 
   try {
     const existing = await blogService.findPost(postId);
@@ -79,7 +114,31 @@ async function updatePost(req, res) {
       mediaUrl = await uploadFile(req.file);
     }
 
-    const post = await blogService.updatePost(postId, { title, content, mediaUrl, link });
+    let resolvedSeriesId;
+    if (seriesId !== undefined) {
+      if (seriesId === null || seriesId === "" || seriesId === "null") {
+        resolvedSeriesId = null;
+      } else {
+        resolvedSeriesId = Number(seriesId);
+        const series = await blogService.findSeries(resolvedSeriesId);
+        if (!series) return res.status(404).json({ message: "Series not found." });
+      }
+    }
+
+    const resolvedSeriesOrder =
+      seriesOrder !== undefined && seriesOrder !== null && seriesOrder !== ""
+        ? Number(seriesOrder)
+        : undefined;
+
+    const post = await blogService.updatePost(postId, {
+      title,
+      content,
+      mediaUrl,
+      link,
+      seriesId: resolvedSeriesId,
+      seriesOrder: resolvedSeriesOrder,
+      category: category !== undefined ? (category || null) : undefined,
+    });
     res.status(200).json({ post });
   } catch (error) {
     console.error("Update blog post error:", error);
@@ -104,6 +163,21 @@ async function deletePost(req, res) {
     res.status(200).json({ message: "Post deleted successfully." });
   } catch (error) {
     console.error("Delete blog post error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+async function togglePin(req, res) {
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Admin access required." });
+  }
+  const postId = Number(req.params.postId);
+  try {
+    const result = await blogService.togglePostPin(postId);
+    if (!result) return res.status(404).json({ message: "Post not found." });
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Toggle pin error:", error);
     res.status(500).json({ message: "Something went wrong. Please try again later." });
   }
 }
@@ -242,17 +316,128 @@ async function deleteReply(req, res) {
   }
 }
 
+// ─── Series ─────────────────────────────────────────────────────────────────
+
+async function createSeries(req, res) {
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Admin access required." });
+  }
+
+  // req.body can be undefined if multer fails to parse (e.g. wrong field name or
+  // a middleware ordering issue) — guard defensively.
+  const body = req.body || {};
+  const { title, slug, description, coverUrl, category } = body;
+  if (!title || !slug) {
+    return res.status(400).json({ message: "Title and slug are required." });
+  }
+
+  try {
+    let resolvedCoverUrl = coverUrl || null;
+    if (req.file) {
+      resolvedCoverUrl = await uploadFile(req.file);
+    }
+
+    const series = await blogService.createSeries({ title, slug, description, coverUrl: resolvedCoverUrl, category: category || null });
+    res.status(201).json({ series });
+  } catch (error) {
+    if (error.code === "P2002") {
+      return res.status(409).json({ message: "A series with that slug already exists." });
+    }
+    console.error("Create blog series error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+async function getSeriesList(req, res) {
+  try {
+    const series = await blogService.getSeriesList();
+    res.status(200).json({ series });
+  } catch (error) {
+    console.error("Get blog series error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+async function getSeries(req, res) {
+  const { slug } = req.params;
+
+  try {
+    const series = await blogService.getSeriesBySlug(slug);
+    if (!series) return res.status(404).json({ message: "Series not found." });
+    res.status(200).json({ series });
+  } catch (error) {
+    console.error("Get blog series error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+async function updateSeries(req, res) {
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Admin access required." });
+  }
+
+  const seriesId = Number(req.params.seriesId);
+  const body = req.body || {};
+  const { title, slug, description, coverUrl, category } = body;
+
+  try {
+    const existing = await blogService.findSeries(seriesId);
+    if (!existing) return res.status(404).json({ message: "Series not found." });
+
+    let resolvedCoverUrl = coverUrl !== undefined ? (coverUrl || null) : undefined;
+    if (req.file) {
+      if (existing.coverUrl) await deleteFile(existing.coverUrl);
+      resolvedCoverUrl = await uploadFile(req.file);
+    }
+
+    const series = await blogService.updateSeries(seriesId, { title, slug, description, coverUrl: resolvedCoverUrl, category: category !== undefined ? (category || null) : undefined });
+    res.status(200).json({ series });
+  } catch (error) {
+    if (error.code === "P2002") {
+      return res.status(409).json({ message: "A series with that slug already exists." });
+    }
+    console.error("Update blog series error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+async function deleteSeries(req, res) {
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Admin access required." });
+  }
+
+  const seriesId = Number(req.params.seriesId);
+
+  try {
+    const existing = await blogService.findSeries(seriesId);
+    if (!existing) return res.status(404).json({ message: "Series not found." });
+
+    await blogService.deleteSeries(seriesId);
+    res.status(200).json({ message: "Series deleted successfully. Its posts remain as standalone posts." });
+  } catch (error) {
+    console.error("Delete blog series error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
 module.exports = {
+  uploadImage,
   createPost,
   getPosts,
   getPost,
   updatePost,
   deletePost,
   toggleLike,
+  togglePin,
   getComments,
   addComment,
   deleteComment,
   getReplies,
   addReply,
   deleteReply,
+  createSeries,
+  getSeriesList,
+  getSeries,
+  updateSeries,
+  deleteSeries,
 };

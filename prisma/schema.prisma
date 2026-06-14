@@ -378,12 +378,49 @@ model BlogPost {
   content   String
   mediaUrl  String?
   link      String?
+  category  String?
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
   likes     BlogPostLike[]
   comments  BlogComment[]
 
+  // ── series support ───────────────────────────────────────────────────────
+  // A post can optionally belong to a series (e.g. an event's story
+  // submissions). seriesOrder controls its position for "next/previous"
+  // navigation. Posts with seriesId = null are standalone, single posts.
+  seriesId    Int?
+  seriesOrder Int?
+  series      BlogSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+
+  isPinned    Boolean  @default(false)
+
   @@index([createdAt])
+  @@index([seriesId])
+  @@index([seriesId, seriesOrder])
+  @@index([isPinned])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLOG SERIES
+//
+// Groups related blog posts together (e.g. an ongoing story, or all of the
+// submissions for a community event) so they can be browsed as a collection
+// and linked with "next/previous" navigation.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model BlogSeries {
+  id          Int       @id @default(autoincrement())
+  title       String
+  slug        String    @unique
+  description String?
+  coverUrl    String?
+  category    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  posts       BlogPost[]
+
+  @@index([slug])
 }
 
 model BlogPostLike {

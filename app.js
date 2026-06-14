@@ -5,6 +5,7 @@ const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const multer = require("multer");
 require("./jobs/scheduledjobs");
+const { startChallengeCron } = require("./jobs/challengecron");
 const rateLimit = require("express-rate-limit");
 
 const authRoutes        = require("./src/routes/authRoutes");
@@ -41,6 +42,8 @@ app.use(cookieParser());
 // });
 
 // app.use("/api/", limiter); // applies to all your API routes
+startChallengeCron();
+
 app.use("/api/auth",          authRoutes);
 app.use("/api/sprint",        groupSprintRoutes);
 app.use("/api/users",         userRoutes);

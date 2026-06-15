@@ -931,6 +931,7 @@ enum Role {
 enum SnippetSource {
   POST_SPRINT
   STANDALONE
+  DAYS_CHALLENGE
 }
 
 enum Visibility {

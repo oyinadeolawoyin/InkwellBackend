@@ -10,6 +10,33 @@ function countWords(str) {
   return str.trim().split(/\s+/).filter(Boolean).length;
 }
 
+// ─── Mention helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Extract unique @username mentions from content string.
+ * Returns array of lowercase usernames (without the @ prefix).
+ */
+function extractMentions(content) {
+  const matches = content.match(/@([a-zA-Z0-9_]+)/g) || [];
+  return [...new Set(matches.map(m => m.slice(1).toLowerCase()))];
+}
+
+/**
+ * Notify all @mentioned users in a comment or reply.
+ * Skips the author themselves.
+ */
+async function notifyMentions(content, authorId, linkUrl) {
+  const usernames = extractMentions(content);
+  if (usernames.length === 0) return;
+  await Promise.allSettled(
+    usernames.map(async (username) => {
+      const mentioned = await threadService.getUserByUsername(username);
+      if (!mentioned || mentioned.id === authorId) return;
+      notifyUser(mentioned, `You were mentioned in a comment.`, linkUrl, "thread_mention").catch(() => {});
+    })
+  );
+}
+
 // ─── Threads (admin create/edit/delete; public read) ──────────────────────────
 
 async function createThread(req, res) {
@@ -36,14 +63,11 @@ async function createThread(req, res) {
     res.status(201).json({ thread });
 
     // Notify all users about new "discussion" threads only (fire and forget).
-    // Only threads whose title contains "discussion" (case-insensitive)
-    // trigger this broadcast — e.g. "Weekly Discussion: ...". Users can opt
-    // out via their notification preferences ("thread_new_discussion").
     if (title.toLowerCase().includes("discussion")) {
       threadService.getAllUsers().then((users) => {
         const notifLink = `/threads/${thread.id}`;
         users.forEach((u) => {
-          if (u.id === req.user.id) return; // skip the author
+          if (u.id === req.user.id) return;
           notifyUser(u, `New discussion thread: "${title}"`, notifLink).catch(() => {});
         });
       }).catch(() => {});
@@ -188,6 +212,10 @@ async function addComment(req, res) {
 
     const comment = await threadService.addComment(threadId, authorId, content, mediaUrls);
     res.status(201).json({ comment });
+
+    // Fire-and-forget: notify @mentioned users
+    const notifLink = `/threads/${threadId}?comment=${comment.id}`;
+    notifyMentions(content, authorId, notifLink).catch(() => {});
   } catch (error) {
     console.error("Add thread comment error:", error);
     res.status(500).json({ message: "Something went wrong. Please try again later." });
@@ -221,6 +249,20 @@ async function toggleCommentLike(req, res) {
   try {
     const result = await threadService.toggleCommentLike(userId, commentId);
     res.status(200).json(result);
+
+    // Notify comment author when someone likes their comment (fire and forget)
+    if (result.liked) {
+      threadService.findCommentWithAuthor(commentId).then((comment) => {
+        if (comment?.authorId && comment.authorId !== userId) {
+          threadService.getUserById(comment.authorId).then((author) => {
+            if (author) {
+              const notifLink = `/threads/${comment.threadId}?comment=${commentId}`;
+              notifyUser(author, `${req.user.username} liked your comment.`, notifLink, "thread_comment_like").catch(() => {});
+            }
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    }
   } catch (error) {
     console.error("Toggle comment like error:", error);
     res.status(500).json({ message: "Something went wrong. Please try again later." });
@@ -281,6 +323,10 @@ async function addReply(req, res) {
         }
       }).catch(() => {});
     }
+
+    // Notify @mentioned users in the reply (fire and forget)
+    const mentionLink = `/threads/${comment.threadId}?comment=${commentId}&reply=${reply.id}`;
+    notifyMentions(content, authorId, mentionLink).catch(() => {});
   } catch (error) {
     console.error("Add thread reply error:", error);
     res.status(500).json({ message: "Something went wrong. Please try again later." });
@@ -341,9 +387,37 @@ async function toggleReplyLike(req, res) {
   try {
     const result = await threadService.toggleReplyLike(userId, replyId);
     res.status(200).json(result);
+
+    // Notify reply author when someone likes their reply (fire and forget)
+    if (result.liked) {
+      threadService.findReplyWithAuthor(replyId).then((reply) => {
+        if (reply?.authorId && reply.authorId !== userId) {
+          threadService.getUserById(reply.authorId).then((author) => {
+            if (author) {
+              const notifLink = `/threads/${reply.comment?.threadId}?comment=${reply.commentId}&reply=${replyId}`;
+              notifyUser(author, `${req.user.username} liked your reply.`, notifLink, "thread_reply_like").catch(() => {});
+            }
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    }
   } catch (error) {
     console.error("Toggle reply like error:", error);
     res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── Member search (for @mention autocomplete) ────────────────────────────────
+
+async function searchMembers(req, res) {
+  const query = (req.query.q || "").trim();
+  if (!query || query.length < 2) return res.status(200).json({ users: [] });
+  try {
+    const users = await threadService.searchUsersByUsername(query);
+    res.status(200).json({ users });
+  } catch (error) {
+    console.error("Search members error:", error);
+    res.status(500).json({ message: "Something went wrong." });
   }
 }
 
@@ -364,4 +438,5 @@ module.exports = {
   addReply,
   deleteReply,
   toggleReplyLike,
+  searchMembers,
 };

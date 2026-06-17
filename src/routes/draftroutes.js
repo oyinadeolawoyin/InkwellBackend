@@ -13,6 +13,16 @@ router.get("/sprint-picker",        authenticateJWT, ctrl.getDraftsForSprintPick
 // Auto-save when sprint ends with Inkwell editor content
 router.post("/sprint-save",         authenticateJWT, ctrl.sprintAutoSave);
 
+// ─── STAGED FOR FEEDBACK (written, but not enough points to post yet) ───────
+
+// The writer's current chapter waiting on points, if any — powers the
+// "unlock your post" nudge on the homepage and drafts page.
+router.get("/staged",               authenticateJWT, ctrl.getStagedDraft);
+
+// Save (or update) a fresh chapter as "staged for feedback" from the
+// submission form, when the writer doesn't yet have enough posting points.
+router.post("/stage-for-feedback",  authenticateJWT, ctrl.stageDraftForFeedback);
+
 // ─── UNPUBLISH (submission → draft) ──────────────────────────────────────────
 
 // Move a live critique submission to drafts

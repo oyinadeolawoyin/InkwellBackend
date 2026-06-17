@@ -322,4 +322,47 @@ module.exports = {
   getAdminUsers,
   getAllUsers,
   getUserDiscussionCount,
+  getUserByUsername,
+  searchUsersByUsername,
+  findCommentWithAuthor,
+  findReplyWithAuthor,
 };
+// ─── New helpers for mentions & like notifications ────────────────────────────
+
+async function getUserByUsername(username) {
+  return prisma.user.findFirst({
+    where: { username: { equals: username, mode: "insensitive" }, isDeleted: false },
+    select: { id: true, username: true, email: true },
+  });
+}
+
+async function searchUsersByUsername(query) {
+  return prisma.user.findMany({
+    where: {
+      username: { contains: query, mode: "insensitive" },
+      isDeleted: false,
+    },
+    select: { id: true, username: true, avatar: true },
+    take: 8,
+    orderBy: { username: "asc" },
+  });
+}
+
+async function findCommentWithAuthor(commentId) {
+  return prisma.threadComment.findUnique({
+    where: { id: commentId },
+    select: { id: true, authorId: true, threadId: true },
+  });
+}
+
+async function findReplyWithAuthor(replyId) {
+  return prisma.threadReply.findUnique({
+    where: { id: replyId },
+    select: {
+      id: true,
+      authorId: true,
+      commentId: true,
+      comment: { select: { threadId: true } },
+    },
+  });
+}

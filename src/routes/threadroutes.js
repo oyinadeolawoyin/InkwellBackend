@@ -4,6 +4,10 @@ const threadController = require("../controllers/threadcontroller");
 const { authenticateJWT } = require("../config/jwt");
 const upload = require("../config/multer");
 
+// ─── Member search for @mention autocomplete ─────────────────────────────────
+
+router.get("/members/search", authenticateJWT, threadController.searchMembers);
+
 // ─── Daily challenge thread (public) ─────────────────────────────────────────
 
 router.get("/daily-challenge", threadController.getDailyThread);

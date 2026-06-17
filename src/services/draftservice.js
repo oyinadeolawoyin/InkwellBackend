@@ -60,6 +60,17 @@ async function getUserDrafts(userId, { page = 1, limit = 20 } = {}) {
         createdAt:           true,
         updatedAt:           true,
         sourceSubmissionId:  true,
+        // Staging fields — let the drafts page tell a chapter that's
+        // genuinely staged-and-waiting-on-points apart from an ordinary
+        // work-in-progress draft, and post it directly without re-opening
+        // the submission form.
+        isStagedForFeedback:    true,
+        stagedGenre:             true,
+        stagedSummary:           true,
+        stagedWordCountTier:     true,
+        stagedDraftStage:        true,
+        stagedContentWarnings:   true,
+        stagedFeedbackWanted:    true,
         sourceSubmission: {
           select: {
             id:            true,
@@ -250,6 +261,76 @@ async function getDraftForPosting(draftId, userId) {
   return draft;
 }
 
+// ─── STAGE DRAFT FOR FEEDBACK (written, but not enough points to post yet) ──
+
+/**
+ * Save a freshly-written chapter as "staged for feedback".
+ *
+ * This is the path the submission form falls back to when the writer has
+ * finished a chapter and chosen a tier, but doesn't have enough posting
+ * points to send it to the Critique Hub right now. Instead of losing their
+ * work, it's saved as a WritingDraft with isStagedForFeedback = true, and
+ * the submission metadata (genre, summary, tier, draft stage, etc.) is
+ * stored alongside it so the chapter can be posted in one click later —
+ * once the writer earns enough points by critiquing — without re-filling
+ * the whole form.
+ *
+ * isStagedForFeedback is what lets the frontend tell "a chapter is genuinely
+ * waiting to be unlocked" apart from an ordinary work-in-progress draft the
+ * writer is just drafting on their own with no submission intent yet.
+ *
+ * @param {number} userId
+ * @param {object} data
+ * @param {number|null} data.draftId  — pass the previously-staged draft's id to update it in place
+ */
+async function stageDraftForFeedback(userId, {
+  draftId = null,
+  title,
+  content,
+  genre,
+  summary,
+  wordCountTier,
+  draftStage,
+  contentWarnings = [],
+  feedbackWanted  = [],
+} = {}) {
+  if (!content?.trim()) throw new Error("Your chapter is empty. Write something first.");
+
+  const stagedFields = {
+    title:                  title?.trim() || null,
+    content,
+    wordCount:              countWords(content),
+    isStagedForFeedback:    true,
+    stagedGenre:            genre || null,
+    stagedSummary:          summary || null,
+    stagedWordCountTier:    wordCountTier || null,
+    stagedDraftStage:       draftStage || null,
+    stagedContentWarnings:  contentWarnings,
+    stagedFeedbackWanted:   feedbackWanted,
+    stagedAt:               new Date(),
+  };
+
+  if (draftId) {
+    const existing = await prisma.writingDraft.findFirst({ where: { id: draftId, userId } });
+    if (!existing) throw new Error("Draft not found.");
+    if (existing.sourceSubmissionId) {
+      throw new Error("This draft is linked to a live submission — use unpublish/republish instead.");
+    }
+    return prisma.writingDraft.update({ where: { id: draftId }, data: stagedFields });
+  }
+
+  return prisma.writingDraft.create({ data: { userId, ...stagedFields } });
+}
+
+// Returns the writer's current staged-for-feedback draft (most recent), or null.
+// Used to power accurate "unlock your post" messaging — never a generic guess.
+async function getStagedDraft(userId) {
+  return prisma.writingDraft.findFirst({
+    where:   { userId, isStagedForFeedback: true, sourceSubmissionId: null },
+    orderBy: { stagedAt: "desc" },
+  });
+}
+
 // ─── SPRINT AUTO-SAVE ─────────────────────────────────────────────────────────
 
 async function sprintAutoSave(userId, { draftId, title, content }) {
@@ -297,5 +378,7 @@ module.exports = {
   unpublishSubmission,
   republishDraft,
   getDraftForPosting,
+  stageDraftForFeedback,
+  getStagedDraft,
   sprintAutoSave,
 };

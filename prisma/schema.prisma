@@ -799,6 +799,27 @@ model WritingDraft {
   // If this draft came from unpublishing a submission, link it
   sourceSubmissionId   Int?                @unique
 
+  // ── "Staged for feedback" ───────────────────────────────────────────────
+  // True when this draft was saved via the submission form's "Stage Your
+  // Chapter for Feedback" button — i.e. the writer finished a chapter and
+  // chose a submission tier, but didn't have enough posting points to send
+  // it to the Critique Hub yet. This is what distinguishes a chapter that's
+  // genuinely waiting to be unlocked from an ordinary work-in-progress draft
+  // the writer just happens to be drafting on their own (those should never
+  // trigger the "unlock your post" nudge).
+  isStagedForFeedback   Boolean        @default(false)
+
+  // Submission metadata captured at staging time, so the chapter can be
+  // posted in one click once the writer earns enough points — no need to
+  // re-fill the submission form from scratch.
+  stagedGenre           String?
+  stagedSummary         String?
+  stagedWordCountTier   WordCountTier?
+  stagedDraftStage      DraftStage?
+  stagedContentWarnings String[]       @default([])
+  stagedFeedbackWanted  String[]       @default([])
+  stagedAt              DateTime?
+
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 
@@ -807,6 +828,7 @@ model WritingDraft {
 
   @@index([userId])
   @@index([createdAt])
+  @@index([userId, isStagedForFeedback])
 }
 
 model DiscoveryStory {

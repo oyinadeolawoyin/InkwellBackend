@@ -184,6 +184,68 @@ async function republishDraft(req, res) {
   }
 }
 
+/**
+ * GET /drafts/staged
+ * Returns the writer's current "staged for feedback" draft, if any — a
+ * chapter they finished writing and chose a tier for, but couldn't yet
+ * afford to post. The homepage and drafts page use this (instead of just
+ * checking "do they have any draft at all") to show an accurate "unlock
+ * your post" nudge rather than a generic one.
+ */
+async function getStagedDraft(req, res) {
+  const userId = Number(req.user.id);
+  try {
+    const draft = await draftService.getStagedDraft(userId);
+    res.status(200).json({ draft });
+  } catch (error) {
+    console.error("Get staged draft error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+/**
+ * POST /drafts/stage-for-feedback
+ * Saves a freshly-written chapter as a draft tagged "staged for feedback".
+ * Used by the submission form when the writer doesn't have enough posting
+ * points for the tier they picked — their chapter and submission details
+ * (genre, summary, tier, draft stage, etc.) are preserved so it can be
+ * posted in one click once they've earned enough points by critiquing.
+ * Body: { draftId?, title, content, genre, summary, wordCountTier, draftStage, contentWarnings, feedbackWanted }
+ */
+async function stageDraftForFeedback(req, res) {
+  const userId = Number(req.user.id);
+  const {
+    draftId,
+    title,
+    content,
+    genre,
+    summary,
+    wordCountTier,
+    draftStage,
+    contentWarnings = [],
+    feedbackWanted  = [],
+  } = req.body;
+
+  try {
+    const draft = await draftService.stageDraftForFeedback(userId, {
+      draftId: draftId ? Number(draftId) : null,
+      title, content, genre, summary, wordCountTier, draftStage,
+      contentWarnings, feedbackWanted,
+    });
+    res.status(200).json({ draft });
+  } catch (error) {
+    if (
+      error.message === "Draft not found." ||
+      error.message.startsWith("Your chapter is empty") ||
+      error.message.startsWith("This draft is linked")
+    ) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error("Stage draft for feedback error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
 // ─── POST DRAFT TO FEEDBACK HUB (fresh draft → new submission) ───────────────
 
 /**
@@ -207,8 +269,8 @@ async function postDraftToHub(req, res) {
     summary,
     draftStage,
     wordCountTier,
-    contentWarnings = [],
-    feedbackWanted  = [],
+    contentWarnings,
+    feedbackWanted,
   } = req.body;
 
   try {
@@ -222,16 +284,30 @@ async function postDraftToHub(req, res) {
       return res.status(400).json({ message: "Your draft is empty. Write something first." });
     }
 
+    // If this draft was previously "staged for feedback", fall back to the
+    // submission details captured at staging time for any field the caller
+    // didn't send — this is what lets a writer unlock and post a staged
+    // chapter directly from the drafts page in one click, without
+    // re-entering the whole submission form.
+    const resolved = {
+      genre:           genre           ?? draft.stagedGenre,
+      summary:         summary         ?? draft.stagedSummary,
+      draftStage:      draftStage      ?? draft.stagedDraftStage,
+      wordCountTier:   wordCountTier   ?? draft.stagedWordCountTier,
+      contentWarnings: contentWarnings ?? draft.stagedContentWarnings ?? [],
+      feedbackWanted:  feedbackWanted  ?? draft.stagedFeedbackWanted  ?? [],
+    };
+
     // 2. Create the submission (handles points, validation, spotlight rule)
     const submission = await feedbackService.createSubmission(userId, {
       title:          draft.title,
-      genre,
-      summary,
+      genre:          resolved.genre,
+      summary:        resolved.summary,
       content:        draft.content,
-      wordCountTier,
-      draftStage,
-      contentWarnings,
-      feedbackWanted,
+      wordCountTier:  resolved.wordCountTier,
+      draftStage:     resolved.draftStage,
+      contentWarnings: resolved.contentWarnings,
+      feedbackWanted:  resolved.feedbackWanted,
     });
 
     // 3. Delete the draft — it's now a live submission
@@ -258,7 +334,8 @@ async function postDraftToHub(req, res) {
       error.message.startsWith("Please add at least") ||
       error.message.startsWith("Your chapter is") ||
       error.message === "Draft not found." ||
-      error.message.startsWith("This draft is linked")
+      error.message.startsWith("This draft is linked") ||
+      error.message.startsWith("Not enough points")
     ) {
       return res.status(400).json({ message: error.message });
     }
@@ -311,5 +388,7 @@ module.exports = {
   unpublishSubmission,
   republishDraft,
   postDraftToHub,
+  getStagedDraft,
+  stageDraftForFeedback,
   sprintAutoSave,
 };

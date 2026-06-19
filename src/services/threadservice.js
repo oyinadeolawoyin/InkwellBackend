@@ -147,6 +147,70 @@ async function getThreads({ page = 1, limit = 20, categoryId } = {}) {
   return { threads, total, page, totalPages: Math.ceil(total / limit) };
 }
 
+/**
+ * Threads for the homepage "Pinned & Today" widget:
+ *   - all pinned threads (any date), plus
+ *   - all non-pinned threads created since local midnight today
+ * Pinned threads are returned first, each group ordered newest first.
+ * `limit` caps the combined result so the widget doesn't grow unbounded
+ * on a busy day.
+ */
+async function getPinnedAndTodayThreads({ limit = 10 } = {}) {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const [pinned, today] = await Promise.all([
+    prisma.thread.findMany({
+      where: { isPinned: true },
+      orderBy: { createdAt: "desc" },
+      include: {
+        author:   { select: AUTHOR_SELECT },
+        category: { select: { id: true, name: true, slug: true } },
+        _count:   { select: { likes: true, comments: true } },
+      },
+    }),
+    prisma.thread.findMany({
+      where: { isPinned: false, createdAt: { gte: startOfToday } },
+      orderBy: { createdAt: "desc" },
+      include: {
+        author:   { select: AUTHOR_SELECT },
+        category: { select: { id: true, name: true, slug: true } },
+        _count:   { select: { likes: true, comments: true } },
+      },
+    }),
+  ]);
+
+  return [...pinned, ...today].slice(0, limit);
+}
+
+/**
+ * Threads "active" in the last 2 days:
+ *   - created in the last 48 hours, OR
+ *   - received a comment or reply in the last 48 hours
+ * Pinned threads always appear first, then sorted by most recent activity.
+ */
+async function getActiveThreads({ limit = 20 } = {}) {
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+
+  const threads = await prisma.thread.findMany({
+    where: {
+      OR: [
+        { createdAt: { gte: twoDaysAgo } },
+        { comments: { some: { createdAt: { gte: twoDaysAgo } } } },
+      ],
+    },
+    orderBy: [{ isPinned: "desc" }, { createdAt: "desc" }],
+    take: limit,
+    include: {
+      author:   { select: AUTHOR_SELECT },
+      category: { select: { id: true, name: true, slug: true } },
+      _count:   { select: { likes: true, comments: true } },
+    },
+  });
+
+  return threads;
+}
+
 async function getThread(threadId) {
   return prisma.thread.findUnique({
     where: { id: threadId },
@@ -446,6 +510,8 @@ module.exports = {
   // threads
   createThread,
   getThreads,
+  getPinnedAndTodayThreads,
+  getActiveThreads,
   getThread,
   findThread,
   updateThread,

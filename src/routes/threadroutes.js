@@ -32,6 +32,8 @@ router.delete("/categories/:categoryId", authenticateJWT, threadController.delet
 //
 // Filter by category: GET /threads?categoryId=3
 
+router.get(   "/pinned-and-today", threadController.getPinnedAndTodayThreads);
+router.get(   "/active",           threadController.getActiveThreads);
 router.get(   "/",          threadController.getThreads);
 router.get(   "/:threadId", threadController.getThread);
 router.post(  "/",          authenticateJWT, upload.single("media"), threadController.createThread);

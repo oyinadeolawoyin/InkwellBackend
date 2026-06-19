@@ -145,16 +145,14 @@ async function createThread(req, res) {
 
     res.status(201).json({ thread });
 
-    // Notify all users about new "discussion" threads only (fire and forget)
-    if (title.toLowerCase().includes("discussion")) {
-      threadService.getAllUsers().then((users) => {
-        const notifLink = `/threads/${thread.id}`;
-        users.forEach((u) => {
-          if (u.id === req.user.id) return;
-          notifyUser(u, `New discussion thread: "${title}"`, notifLink).catch(() => {});
-        });
-      }).catch(() => {});
-    }
+    // Notify all members about every new thread (fire and forget)
+    threadService.getAllUsers().then((users) => {
+      const notifLink = `/threads/${thread.id}`;
+      users.forEach((u) => {
+        if (u.id === req.user.id) return;
+        notifyUser(u, `New thread: "${title}"`, notifLink, "thread_new").catch(() => {});
+      });
+    }).catch(() => {});
   } catch (error) {
     console.error("Create thread error:", error);
     res.status(500).json({ message: "Something went wrong. Please try again later." });
@@ -171,6 +169,31 @@ async function getThreads(req, res) {
     res.status(200).json(result);
   } catch (error) {
     console.error("Get threads error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── Pinned & today's threads (homepage widget) ────────────────────────────────
+
+async function getPinnedAndTodayThreads(req, res) {
+  const limit = parseInt(req.query.limit) || 10;
+
+  try {
+    const threads = await threadService.getPinnedAndTodayThreads({ limit });
+    res.status(200).json({ threads });
+  } catch (error) {
+    console.error("Get pinned/today threads error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+async function getActiveThreads(req, res) {
+  const limit = parseInt(req.query.limit) || 20;
+  try {
+    const threads = await threadService.getActiveThreads({ limit });
+    res.status(200).json({ threads });
+  } catch (error) {
+    console.error("Get active threads error:", error);
     res.status(500).json({ message: "Something went wrong. Please try again later." });
   }
 }
@@ -513,6 +536,8 @@ module.exports = {
   // threads
   createThread,
   getThreads,
+  getPinnedAndTodayThreads,
+  getActiveThreads,
   getThread,
   updateThread,
   deleteThread,

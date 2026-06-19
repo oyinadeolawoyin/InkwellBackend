@@ -148,6 +148,33 @@ async function getThreads({ page = 1, limit = 20, categoryId } = {}) {
 }
 
 /**
+ * Threads for the "Latest" tab — newest first, pinned threads excluded
+ * so they don't duplicate what's already shown in the Pinned tab.
+ */
+async function getLatestThreads({ page = 1, limit = 20, categoryId } = {}) {
+  const skip = (page - 1) * limit;
+
+  const where = { isPinned: false, ...(categoryId ? { categoryId } : {}) };
+
+  const [threads, total] = await Promise.all([
+    prisma.thread.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { createdAt: "desc" },
+      include: {
+        author:   { select: AUTHOR_SELECT },
+        category: { select: { id: true, name: true, slug: true } },
+        _count:   { select: { likes: true, comments: true } },
+      },
+    }),
+    prisma.thread.count({ where }),
+  ]);
+
+  return { threads, total, page, totalPages: Math.ceil(total / limit) };
+}
+
+/**
  * Threads for the homepage "Pinned & Today" widget:
  *   - all pinned threads (any date), plus
  *   - all non-pinned threads created since local midnight today
@@ -181,6 +208,23 @@ async function getPinnedAndTodayThreads({ limit = 10 } = {}) {
   ]);
 
   return [...pinned, ...today].slice(0, limit);
+}
+
+/**
+ * Threads for the homepage "Pinned" tab — only threads with isPinned: true,
+ * newest pinned first. No mixing with today's/recent threads.
+ */
+async function getPinnedThreads({ limit = 10 } = {}) {
+  return prisma.thread.findMany({
+    where: { isPinned: true },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    include: {
+      author:   { select: AUTHOR_SELECT },
+      category: { select: { id: true, name: true, slug: true } },
+      _count:   { select: { likes: true, comments: true } },
+    },
+  });
 }
 
 /**
@@ -510,6 +554,8 @@ module.exports = {
   // threads
   createThread,
   getThreads,
+  getLatestThreads,
+  getPinnedThreads,
   getPinnedAndTodayThreads,
   getActiveThreads,
   getThread,

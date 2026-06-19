@@ -33,6 +33,8 @@ router.delete("/categories/:categoryId", authenticateJWT, threadController.delet
 // Filter by category: GET /threads?categoryId=3
 
 router.get(   "/pinned-and-today", threadController.getPinnedAndTodayThreads);
+router.get(   "/pinned",           threadController.getPinnedThreads);
+router.get(   "/latest",           threadController.getLatestThreads);
 router.get(   "/active",           threadController.getActiveThreads);
 router.get(   "/",          threadController.getThreads);
 router.get(   "/:threadId", threadController.getThread);

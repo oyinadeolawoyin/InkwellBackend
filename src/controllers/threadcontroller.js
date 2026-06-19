@@ -173,6 +173,36 @@ async function getThreads(req, res) {
   }
 }
 
+// ─── Latest threads (homepage "Latest" tab — excludes pinned) ─────────────────
+
+async function getLatestThreads(req, res) {
+  const page       = parseInt(req.query.page)       || 1;
+  const limit      = parseInt(req.query.limit)      || 20;
+  const categoryId = req.query.categoryId ? Number(req.query.categoryId) : undefined;
+
+  try {
+    const result = await threadService.getLatestThreads({ page, limit, categoryId });
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Get latest threads error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── Pinned-only threads (homepage "Pinned" tab) ───────────────────────────────
+
+async function getPinnedThreads(req, res) {
+  const limit = parseInt(req.query.limit) || 10;
+
+  try {
+    const threads = await threadService.getPinnedThreads({ limit });
+    res.status(200).json({ threads });
+  } catch (error) {
+    console.error("Get pinned threads error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
 // ─── Pinned & today's threads (homepage widget) ────────────────────────────────
 
 async function getPinnedAndTodayThreads(req, res) {
@@ -536,6 +566,8 @@ module.exports = {
   // threads
   createThread,
   getThreads,
+  getLatestThreads,
+  getPinnedThreads,
   getPinnedAndTodayThreads,
   getActiveThreads,
   getThread,

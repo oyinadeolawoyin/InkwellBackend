@@ -465,21 +465,52 @@ model BlogReply {
 // THREADS  (admin-created forum posts; members like, comment, reply)
 // ─────────────────────────────────────────────────────────────────────────────
 
-model Thread {
-  id        Int      @id @default(autoincrement())
-  authorId  Int                                         // always an ADMIN — enforced in service
-  title     String
-  context   String                                      // the body / "what this post is about"
-  mediaUrl  String?                                     // optional image/attachment
-  isPinned  Boolean  @default(false)                    // admins can pin important threads
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ─────────────────────────────────────────────────────────────────────────────
+// THREAD CATEGORY
+// ─────────────────────────────────────────────────────────────────────────────
+// Admins create and manage categories; any authenticated user can post threads.
+// The seven seed categories are:
+//   new-to-inkwell | general | community-discussion | writing-help
+//   critique-discussions | genre | timezone
+// ─────────────────────────────────────────────────────────────────────────────
 
-  author    User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+model ThreadCategory {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique          // display label, e.g. "New to Inkwell"
+  slug        String   @unique          // url-safe key, e.g. "new-to-inkwell"
+  description String?                   // optional blurb shown in the category header
+  sortOrder   Int      @default(0)      // controls listing order in the UI
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  threads     Thread[]
+
+  @@index([sortOrder])
+  @@index([slug])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THREAD  — updated model (replace the existing Thread block)
+// ─────────────────────────────────────────────────────────────────────────────
+model Thread {
+  id         Int      @id @default(autoincrement())
+  authorId   Int                                         // any authenticated member
+  categoryId Int?                                        // null = "uncategorised"
+  title      String
+  context    String                                      // body of the thread
+  mediaUrl   String?                                     // optional image/attachment
+  isPinned   Boolean  @default(false)                    // only admins should pin
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  author    User              @relation(fields: [authorId],   references: [id], onDelete: Cascade)
+  category  ThreadCategory?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   likes     ThreadLike[]
   comments  ThreadComment[]
 
   @@index([authorId])
+  @@index([categoryId])
   @@index([createdAt])
   @@index([isPinned])
 }

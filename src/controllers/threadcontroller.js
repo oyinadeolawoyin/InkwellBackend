@@ -12,19 +12,11 @@ function countWords(str) {
 
 // ─── Mention helpers ──────────────────────────────────────────────────────────
 
-/**
- * Extract unique @username mentions from content string.
- * Returns array of lowercase usernames (without the @ prefix).
- */
 function extractMentions(content) {
   const matches = content.match(/@([a-zA-Z0-9_]+)/g) || [];
   return [...new Set(matches.map(m => m.slice(1).toLowerCase()))];
 }
 
-/**
- * Notify all @mentioned users in a comment or reply.
- * Skips the author themselves.
- */
 async function notifyMentions(content, authorId, linkUrl) {
   const usernames = extractMentions(content);
   if (usernames.length === 0) return;
@@ -37,32 +29,123 @@ async function notifyMentions(content, authorId, linkUrl) {
   );
 }
 
-// ─── Threads (admin create/edit/delete; public read) ──────────────────────────
+// ─── Thread Categories (admin write, public read) ─────────────────────────────
 
-async function createThread(req, res) {
+async function getCategories(req, res) {
+  try {
+    const categories = await threadService.getCategories();
+    res.status(200).json({ categories });
+  } catch (error) {
+    console.error("Get categories error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+async function createCategory(req, res) {
   if (req.user.role !== "ADMIN") {
     return res.status(403).json({ message: "Admin access required." });
   }
 
-  const { title, context, isPinned } = req.body;
+  const { name, slug, description, sortOrder } = req.body;
+  if (!name) return res.status(400).json({ message: "Category name is required." });
+  if (!slug) return res.status(400).json({ message: "Category slug is required." });
+
+  try {
+    const category = await threadService.createCategory({
+      name,
+      slug,
+      description,
+      sortOrder: sortOrder !== undefined ? Number(sortOrder) : 0,
+    });
+    res.status(201).json({ category });
+  } catch (error) {
+    // Unique constraint on name or slug
+    if (error.code === "P2002") {
+      return res.status(409).json({ message: "A category with that name or slug already exists." });
+    }
+    console.error("Create category error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+async function updateCategory(req, res) {
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Admin access required." });
+  }
+
+  const categoryId = Number(req.params.categoryId);
+  const { name, slug, description, sortOrder } = req.body;
+
+  try {
+    const existing = await threadService.findCategory(categoryId);
+    if (!existing) return res.status(404).json({ message: "Category not found." });
+
+    const category = await threadService.updateCategory(categoryId, {
+      name,
+      slug,
+      description,
+      sortOrder: sortOrder !== undefined ? Number(sortOrder) : undefined,
+    });
+    res.status(200).json({ category });
+  } catch (error) {
+    if (error.code === "P2002") {
+      return res.status(409).json({ message: "A category with that name or slug already exists." });
+    }
+    console.error("Update category error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+async function deleteCategory(req, res) {
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ message: "Admin access required." });
+  }
+
+  const categoryId = Number(req.params.categoryId);
+
+  try {
+    const existing = await threadService.findCategory(categoryId);
+    if (!existing) return res.status(404).json({ message: "Category not found." });
+
+    await threadService.deleteCategory(categoryId);
+    // Threads that belonged to this category now have categoryId = null (SetNull)
+    res.status(200).json({ message: "Category deleted. Threads have been moved to Uncategorised." });
+  } catch (error) {
+    console.error("Delete category error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── Threads (any member can create; only admin can edit/delete/pin) ──────────
+
+async function createThread(req, res) {
+  // Any authenticated user may open a thread — authentication is enforced
+  // at the route level via authenticateJWT. Admin-only actions (pinning,
+  // updating, deleting) are guarded separately in those handlers.
+
+  const { title, context, isPinned, categoryId } = req.body;
   if (!title)   return res.status(400).json({ message: "Title is required." });
   if (!context) return res.status(400).json({ message: "Context is required." });
+
+  // Non-admins cannot pin their own threads
+  const wantsPinned = (isPinned === "true" || isPinned === true) && req.user.role === "ADMIN";
 
   try {
     let mediaUrl = null;
     if (req.file) mediaUrl = await uploadFile(req.file);
 
     const thread = await threadService.createThread({
-      authorId: req.user.id,
+      authorId:   req.user.id,
+      categoryId: categoryId ? Number(categoryId) : null,
       title,
       context,
       mediaUrl,
-      isPinned: isPinned === "true" || isPinned === true,
+      isPinned: wantsPinned,
     });
 
     res.status(201).json({ thread });
 
-    // Notify all users about new "discussion" threads only (fire and forget).
+    // Notify all users about new "discussion" threads only (fire and forget)
     if (title.toLowerCase().includes("discussion")) {
       threadService.getAllUsers().then((users) => {
         const notifLink = `/threads/${thread.id}`;
@@ -79,11 +162,12 @@ async function createThread(req, res) {
 }
 
 async function getThreads(req, res) {
-  const page  = parseInt(req.query.page)  || 1;
-  const limit = parseInt(req.query.limit) || 20;
+  const page       = parseInt(req.query.page)       || 1;
+  const limit      = parseInt(req.query.limit)      || 20;
+  const categoryId = req.query.categoryId ? Number(req.query.categoryId) : undefined;
 
   try {
-    const result = await threadService.getThreads({ page, limit });
+    const result = await threadService.getThreads({ page, limit, categoryId });
     res.status(200).json(result);
   } catch (error) {
     console.error("Get threads error:", error);
@@ -105,12 +189,13 @@ async function getThread(req, res) {
 }
 
 async function updateThread(req, res) {
+  // Only admins can edit threads (including reassigning categories)
   if (req.user.role !== "ADMIN") {
     return res.status(403).json({ message: "Admin access required." });
   }
 
   const threadId = Number(req.params.threadId);
-  const { title, context, isPinned } = req.body;
+  const { title, context, isPinned, categoryId } = req.body;
 
   try {
     const existing = await threadService.findThread(threadId);
@@ -126,7 +211,8 @@ async function updateThread(req, res) {
       title,
       context,
       mediaUrl,
-      isPinned: isPinned !== undefined ? (isPinned === "true" || isPinned === true) : undefined,
+      isPinned:   isPinned   !== undefined ? (isPinned === "true" || isPinned === true) : undefined,
+      categoryId: categoryId !== undefined ? (categoryId ? Number(categoryId) : null) : undefined,
     });
 
     res.status(200).json({ thread });
@@ -137,15 +223,18 @@ async function updateThread(req, res) {
 }
 
 async function deleteThread(req, res) {
-  if (req.user.role !== "ADMIN") {
-    return res.status(403).json({ message: "Admin access required." });
-  }
-
   const threadId = Number(req.params.threadId);
+  const userId   = req.user.id;
+  const isAdmin  = req.user.role === "ADMIN";
 
   try {
     const existing = await threadService.findThread(threadId);
     if (!existing) return res.status(404).json({ message: "Thread not found." });
+
+    // Admins can delete any thread; members can only delete their own
+    if (existing.authorId !== userId && !isAdmin) {
+      return res.status(403).json({ message: "Not authorized." });
+    }
 
     const mediaUrl = await threadService.deleteThread(threadId);
     if (mediaUrl) await deleteFile(mediaUrl);
@@ -201,7 +290,6 @@ async function addComment(req, res) {
   }
 
   try {
-    // Support up to 5 images: fields media_0 … media_4
     const fileFields = req.files && typeof req.files === "object" && !Array.isArray(req.files)
       ? Object.values(req.files).flat()
       : req.files ?? (req.file ? [req.file] : []);
@@ -213,7 +301,6 @@ async function addComment(req, res) {
     const comment = await threadService.addComment(threadId, authorId, content, mediaUrls);
     res.status(201).json({ comment });
 
-    // Fire-and-forget: notify @mentioned users
     const notifLink = `/threads/${threadId}?comment=${comment.id}`;
     notifyMentions(content, authorId, notifLink).catch(() => {});
   } catch (error) {
@@ -250,7 +337,6 @@ async function toggleCommentLike(req, res) {
     const result = await threadService.toggleCommentLike(userId, commentId);
     res.status(200).json(result);
 
-    // Notify comment author when someone likes their comment (fire and forget)
     if (result.liked) {
       threadService.findCommentWithAuthor(commentId).then((comment) => {
         if (comment?.authorId && comment.authorId !== userId) {
@@ -314,7 +400,6 @@ async function addReply(req, res) {
     const reply = await threadService.addReply(commentId, authorId, content, mediaUrls);
     res.status(201).json({ reply });
 
-    // Notify comment author about the reply (skip self-reply)
     if (comment.authorId && comment.authorId !== authorId) {
       threadService.getUserById(comment.authorId).then((commentAuthor) => {
         if (commentAuthor) {
@@ -324,38 +409,10 @@ async function addReply(req, res) {
       }).catch(() => {});
     }
 
-    // Notify @mentioned users in the reply (fire and forget)
     const mentionLink = `/threads/${comment.threadId}?comment=${commentId}&reply=${reply.id}`;
     notifyMentions(content, authorId, mentionLink).catch(() => {});
   } catch (error) {
     console.error("Add thread reply error:", error);
-    res.status(500).json({ message: "Something went wrong. Please try again later." });
-  }
-}
-
-// ─── Profile stats ──────────────────────────────────────────────────────────
-
-async function getMyDiscussionStats(req, res) {
-  const userId = req.user.id;
-
-  try {
-    const discussionCount = await threadService.getUserDiscussionCount(userId);
-    res.status(200).json({ discussionCount });
-  } catch (error) {
-    console.error("Get discussion stats error:", error);
-    res.status(500).json({ message: "Something went wrong. Please try again later." });
-  }
-}
-
-// ─── Daily challenge thread ───────────────────────────────────────────────────
-
-async function getDailyThread(req, res) {
-  try {
-    const thread = await threadService.getDailyThread();
-    if (!thread) return res.status(404).json({ message: "No daily challenge thread found." });
-    res.status(200).json({ thread });
-  } catch (error) {
-    console.error("Get daily thread error:", error);
     res.status(500).json({ message: "Something went wrong. Please try again later." });
   }
 }
@@ -388,7 +445,6 @@ async function toggleReplyLike(req, res) {
     const result = await threadService.toggleReplyLike(userId, replyId);
     res.status(200).json(result);
 
-    // Notify reply author when someone likes their reply (fire and forget)
     if (result.liked) {
       threadService.findReplyWithAuthor(replyId).then((reply) => {
         if (reply?.authorId && reply.authorId !== userId) {
@@ -403,6 +459,33 @@ async function toggleReplyLike(req, res) {
     }
   } catch (error) {
     console.error("Toggle reply like error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── Profile stats ────────────────────────────────────────────────────────────
+
+async function getMyDiscussionStats(req, res) {
+  const userId = req.user.id;
+
+  try {
+    const discussionCount = await threadService.getUserDiscussionCount(userId);
+    res.status(200).json({ discussionCount });
+  } catch (error) {
+    console.error("Get discussion stats error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
+// ─── Daily challenge thread ───────────────────────────────────────────────────
+
+async function getDailyThread(req, res) {
+  try {
+    const thread = await threadService.getDailyThread();
+    if (!thread) return res.status(404).json({ message: "No daily challenge thread found." });
+    res.status(200).json({ thread });
+  } catch (error) {
+    console.error("Get daily thread error:", error);
     res.status(500).json({ message: "Something went wrong. Please try again later." });
   }
 }
@@ -422,6 +505,12 @@ async function searchMembers(req, res) {
 }
 
 module.exports = {
+  // categories
+  getCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  // threads
   createThread,
   getThreads,
   getThread,
@@ -430,13 +519,16 @@ module.exports = {
   toggleLike,
   getDailyThread,
   getMyDiscussionStats,
+  // comments
   getComments,
   addComment,
   deleteComment,
   toggleCommentLike,
+  // replies
   getReplies,
   addReply,
   deleteReply,
   toggleReplyLike,
+  // search
   searchMembers,
 };

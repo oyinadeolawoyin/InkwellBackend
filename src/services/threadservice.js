@@ -6,39 +6,142 @@ const AUTHOR_SELECT = {
   avatar: true,
 };
 
+// ─── Thread Categories ────────────────────────────────────────────────────────
+
+/**
+ * For each category we return:
+ *   - id, name, slug, description, sortOrder
+ *   - totalPosts      — total thread count
+ *   - activePosts     — threads that received a comment or reply in the last 30 days,
+ *                       OR were created in the last 30 days
+ *   - latestThread    — { id, title, createdAt } of the most recently created thread
+ *   - lastPostAt      — createdAt of that newest thread (null if no threads yet)
+ */
+async function getCategories() {
+  const categories = await prisma.threadCategory.findMany({
+    orderBy: { sortOrder: "asc" },
+    include: {
+      threads: {
+        select: {
+          id: true,
+          title: true,
+          createdAt: true,
+          comments: {
+            select: { createdAt: true },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      },
+    },
+  });
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  return categories.map((cat) => {
+    const { threads, ...rest } = cat;
+
+    const totalPosts = threads.length;
+
+    // A thread is "active" if it was created or had a comment within 30 days
+    const activePosts = threads.filter((t) => {
+      if (t.createdAt >= thirtyDaysAgo) return true;
+      const lastComment = t.comments[0];
+      return lastComment && lastComment.createdAt >= thirtyDaysAgo;
+    }).length;
+
+    // Most recently created thread
+    const sorted = [...threads].sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+    const latest = sorted[0] ?? null;
+
+    return {
+      ...rest,
+      totalPosts,
+      activePosts,
+      latestThread: latest
+        ? { id: latest.id, title: latest.title, createdAt: latest.createdAt }
+        : null,
+      lastPostAt: latest ? latest.createdAt : null,
+    };
+  });
+}
+
+async function createCategory({ name, slug, description, sortOrder }) {
+  return prisma.threadCategory.create({
+    data: {
+      name,
+      slug,
+      description: description ?? null,
+      sortOrder:   sortOrder   ?? 0,
+    },
+  });
+}
+
+async function findCategory(categoryId) {
+  return prisma.threadCategory.findUnique({
+    where: { id: categoryId },
+    select: { id: true, name: true, slug: true },
+  });
+}
+
+async function updateCategory(categoryId, { name, slug, description, sortOrder }) {
+  return prisma.threadCategory.update({
+    where: { id: categoryId },
+    data: {
+      ...(name        !== undefined && { name }),
+      ...(slug        !== undefined && { slug }),
+      ...(description !== undefined && { description }),
+      ...(sortOrder   !== undefined && { sortOrder }),
+    },
+  });
+}
+
+async function deleteCategory(categoryId) {
+  // Threads whose category is deleted will have categoryId set to null
+  // because the schema uses onDelete: SetNull on the category relation.
+  return prisma.threadCategory.delete({ where: { id: categoryId } });
+}
+
 // ─── Threads ──────────────────────────────────────────────────────────────────
 
-async function createThread({ authorId, title, context, mediaUrl, isPinned }) {
+async function createThread({ authorId, categoryId, title, context, mediaUrl, isPinned }) {
   return prisma.thread.create({
     data: {
       authorId,
+      categoryId: categoryId ?? null,
       title,
       context,
       mediaUrl: mediaUrl || null,
       isPinned: isPinned ?? false,
     },
     include: {
-      author: { select: AUTHOR_SELECT },
-      _count: { select: { likes: true, comments: true } },
+      author:   { select: AUTHOR_SELECT },
+      category: { select: { id: true, name: true, slug: true } },
+      _count:   { select: { likes: true, comments: true } },
     },
   });
 }
 
-async function getThreads({ page = 1, limit = 20 } = {}) {
+async function getThreads({ page = 1, limit = 20, categoryId } = {}) {
   const skip = (page - 1) * limit;
+
+  const where = categoryId ? { categoryId } : {};
 
   const [threads, total] = await Promise.all([
     prisma.thread.findMany({
+      where,
       skip,
       take: limit,
-      // Pinned threads surface first, then newest
       orderBy: [{ isPinned: "desc" }, { createdAt: "desc" }],
       include: {
-        author: { select: AUTHOR_SELECT },
-        _count: { select: { likes: true, comments: true } },
+        author:   { select: AUTHOR_SELECT },
+        category: { select: { id: true, name: true, slug: true } },
+        _count:   { select: { likes: true, comments: true } },
       },
     }),
-    prisma.thread.count(),
+    prisma.thread.count({ where }),
   ]);
 
   return { threads, total, page, totalPages: Math.ceil(total / limit) };
@@ -48,8 +151,9 @@ async function getThread(threadId) {
   return prisma.thread.findUnique({
     where: { id: threadId },
     include: {
-      author: { select: AUTHOR_SELECT },
-      _count: { select: { likes: true, comments: true } },
+      author:   { select: AUTHOR_SELECT },
+      category: { select: { id: true, name: true, slug: true } },
+      _count:   { select: { likes: true, comments: true } },
     },
   });
 }
@@ -57,22 +161,24 @@ async function getThread(threadId) {
 async function findThread(threadId) {
   return prisma.thread.findUnique({
     where: { id: threadId },
-    select: { id: true, authorId: true, mediaUrl: true },
+    select: { id: true, authorId: true, mediaUrl: true, categoryId: true },
   });
 }
 
-async function updateThread(threadId, { title, context, mediaUrl, isPinned }) {
+async function updateThread(threadId, { title, context, mediaUrl, isPinned, categoryId }) {
   return prisma.thread.update({
     where: { id: threadId },
     data: {
-      ...(title     !== undefined && { title }),
-      ...(context   !== undefined && { context }),
-      ...(mediaUrl  !== undefined && { mediaUrl }),
-      ...(isPinned  !== undefined && { isPinned }),
+      ...(title      !== undefined && { title }),
+      ...(context    !== undefined && { context }),
+      ...(mediaUrl   !== undefined && { mediaUrl }),
+      ...(isPinned   !== undefined && { isPinned }),
+      ...(categoryId !== undefined && { categoryId }),
     },
     include: {
-      author: { select: AUTHOR_SELECT },
-      _count: { select: { likes: true, comments: true } },
+      author:   { select: AUTHOR_SELECT },
+      category: { select: { id: true, name: true, slug: true } },
+      _count:   { select: { likes: true, comments: true } },
     },
   });
 }
@@ -135,8 +241,6 @@ async function addComment(threadId, authorId, content, mediaUrls = []) {
       threadId,
       authorId,
       content,
-      // Keep legacy mediaUrl for any existing single-image rows;
-      // new posts store the full array in mediaUrls (Json field).
       mediaUrl:  mediaUrls[0] ?? null,
       mediaUrls: mediaUrls.length > 0 ? mediaUrls : [],
     },
@@ -218,8 +322,6 @@ async function addReply(commentId, authorId, content, mediaUrls = []) {
 }
 
 // ─── Daily challenge thread ───────────────────────────────────────────────────
-// Fetch the pinned thread whose title starts with "Daily Writing Challenge"
-// (or whatever title the admin gave it). Admins create this once via POST /threads.
 
 async function getDailyThread() {
   return prisma.thread.findFirst({
@@ -228,8 +330,9 @@ async function getDailyThread() {
       title:    { contains: "Daily Writing", mode: "insensitive" },
     },
     include: {
-      author: { select: AUTHOR_SELECT },
-      _count: { select: { likes: true, comments: true } },
+      author:   { select: AUTHOR_SELECT },
+      category: { select: { id: true, name: true, slug: true } },
+      _count:   { select: { likes: true, comments: true } },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -267,7 +370,7 @@ async function toggleReplyLike(userId, replyId) {
   });
 }
 
-// ─── User helpers (notifications) ─────────────────────────────────────────────
+// ─── User helpers ─────────────────────────────────────────────────────────────
 
 async function getUserById(userId) {
   return prisma.user.findUnique({
@@ -282,8 +385,6 @@ async function getAllUsers() {
   });
 }
 
-// Total number of comments a user has posted across all threads —
-// surfaced on their profile to encourage discussion participation.
 async function getUserDiscussionCount(userId) {
   return prisma.threadComment.count({ where: { authorId: userId } });
 }
@@ -295,39 +396,7 @@ async function getAdminUsers() {
   });
 }
 
-module.exports = {
-  // threads
-  createThread,
-  getThreads,
-  getThread,
-  findThread,
-  updateThread,
-  deleteThread,
-  toggleThreadLike,
-  getDailyThread,
-  // comments
-  getComments,
-  addComment,
-  findComment,
-  deleteComment,
-  toggleCommentLike,
-  // replies
-  getReplies,
-  addReply,
-  findReply,
-  deleteReply,
-  toggleReplyLike,
-  // users
-  getUserById,
-  getAdminUsers,
-  getAllUsers,
-  getUserDiscussionCount,
-  getUserByUsername,
-  searchUsersByUsername,
-  findCommentWithAuthor,
-  findReplyWithAuthor,
-};
-// ─── New helpers for mentions & like notifications ────────────────────────────
+// ─── Mention / like notification helpers ─────────────────────────────────────
 
 async function getUserByUsername(username) {
   return prisma.user.findFirst({
@@ -366,3 +435,42 @@ async function findReplyWithAuthor(replyId) {
     },
   });
 }
+
+module.exports = {
+  // categories
+  getCategories,
+  createCategory,
+  findCategory,
+  updateCategory,
+  deleteCategory,
+  // threads
+  createThread,
+  getThreads,
+  getThread,
+  findThread,
+  updateThread,
+  deleteThread,
+  toggleThreadLike,
+  getDailyThread,
+  // comments
+  getComments,
+  addComment,
+  findComment,
+  deleteComment,
+  toggleCommentLike,
+  // replies
+  getReplies,
+  addReply,
+  findReply,
+  deleteReply,
+  toggleReplyLike,
+  // users
+  getUserById,
+  getAdminUsers,
+  getAllUsers,
+  getUserDiscussionCount,
+  getUserByUsername,
+  searchUsersByUsername,
+  findCommentWithAuthor,
+  findReplyWithAuthor,
+};

@@ -31,24 +31,10 @@ async function countUsers() {
  * @param {string} userData.email - Email address
  * @returns {Promise<Object>} Created user object
  */
-async function createUser({ 
-    username, 
-    password, 
-    email, 
-    timezone,
-    referralSource,
-    role 
-  }) {
-    return await prisma.user.create({
-      data: {
-        username,
-        password,
-        email,
-        timezone: timezone?.trim(),
-        referralSource: referralSource || null,
-        role: role || "USER" 
-      }
-    });
+async function createUser({ username, password, email, timezone, referralSource, projectType, timeOnProject, biggestBlock, role }) {
+  return await prisma.user.create({
+    data: { username, password, email, timezone, referralSource, projectType, timeOnProject, biggestBlock, role }
+  })
 }
 
 async function updateUser({

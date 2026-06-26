@@ -36,8 +36,8 @@ async function signup(req, res) {
     return res.status(400).json({ message: errorMessages });
   }
 
-  const { username, password, email, timezone, referralSource } = req.body;
-
+  const { username, password, email, timezone, referralSource, projectType, timeOnProject, biggestBlock } = req.body
+console.log("proTy", projectType, "bigest", biggestBlock, "timepro", timeOnProject);
   try {
     const existingEmail = await authService.findUserByEmail(email);
     if (existingEmail) {
@@ -60,6 +60,9 @@ async function signup(req, res) {
       email,
       timezone,
       referralSource: referralSource || null,
+      projectType: projectType || null,
+      timeOnProject: timeOnProject || null,
+      biggestBlock: biggestBlock || null,
       role: isPremiumEligible ? "FOUNDING_WRITER" : "USER",
     });
 

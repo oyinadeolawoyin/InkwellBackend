@@ -6,6 +6,68 @@ const AUTHOR_SELECT = {
   avatar: true,
 };
 
+/**
+ * Thread._count.comments only counts top-level ThreadComment rows — it does
+ * NOT include their ThreadReply children. For an accurate "N comments" total
+ * on a thread card, we need comments + all replies under those comments.
+ *
+ * This takes an array of threads (each already carrying _count from a normal
+ * Prisma `include`) and adds two convenience fields the frontend needs:
+ *   - totalCommentCount  — comments + replies combined
+ *   - likesCount         — alias of _count.likes (avoids drilling into _count on every card)
+ *
+ * Both are computed in a single grouped query rather than one extra query per
+ * thread.
+ */
+async function attachCommentTotals(threads) {
+  if (threads.length === 0) return threads;
+
+  const threadIds = threads.map((t) => t.id);
+
+  // One query: reply counts grouped by the comment's threadId.
+  const replyCounts = await prisma.threadReply.groupBy({
+    by: ["commentId"],
+    where: { comment: { threadId: { in: threadIds } } },
+    _count: { _all: true },
+  });
+
+  if (replyCounts.length === 0) {
+    return threads.map((t) => ({
+      ...t,
+      totalCommentCount: t._count?.comments ?? 0,
+      likesCount: t._count?.likes ?? 0,
+    }));
+  }
+
+  // Map commentId -> threadId so we can roll reply counts up to the thread level.
+  const commentIds = replyCounts.map((r) => r.commentId);
+  const commentsWithThread = await prisma.threadComment.findMany({
+    where: { id: { in: commentIds } },
+    select: { id: true, threadId: true },
+  });
+  const commentIdToThreadId = new Map(commentsWithThread.map((c) => [c.id, c.threadId]));
+
+  const replyCountByThreadId = new Map();
+  for (const r of replyCounts) {
+    const threadId = commentIdToThreadId.get(r.commentId);
+    if (threadId == null) continue;
+    replyCountByThreadId.set(threadId, (replyCountByThreadId.get(threadId) ?? 0) + r._count._all);
+  }
+
+  return threads.map((t) => ({
+    ...t,
+    totalCommentCount: (t._count?.comments ?? 0) + (replyCountByThreadId.get(t.id) ?? 0),
+    likesCount: t._count?.likes ?? 0,
+  }));
+}
+
+/** Same idea, for a single thread (thread page). */
+async function attachCommentTotal(thread) {
+  if (!thread) return thread;
+  const [withTotals] = await attachCommentTotals([thread]);
+  return withTotals;
+}
+
 // ─── Thread Categories ────────────────────────────────────────────────────────
 
 /**
@@ -16,6 +78,8 @@ const AUTHOR_SELECT = {
  *                       OR were created in the last 30 days
  *   - latestThread    — { id, title, createdAt } of the most recently created thread
  *   - lastPostAt      — createdAt of that newest thread (null if no threads yet)
+ *   - latestThreads   — the 3 most recent threads, full card data (author, counts,
+ *                       totalCommentCount) for the category-grid preview on the forum page
  */
 async function getCategories() {
   const categories = await prisma.threadCategory.findMany({
@@ -38,7 +102,33 @@ async function getCategories() {
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  return categories.map((cat) => {
+  // Fetch the 3 latest full thread cards per category in parallel — one
+  // query per category, but categories are few and this only runs on the
+  // forum index, not on every list call.
+  const latestThreadsByCategory = await Promise.all(
+    categories.map((cat) =>
+      prisma.thread.findMany({
+        where: { categoryId: cat.id },
+        orderBy: [{ isPinned: "desc" }, { createdAt: "desc" }],
+        take: 3,
+        include: {
+          author: { select: AUTHOR_SELECT },
+          _count: { select: { likes: true, comments: true } },
+        },
+      })
+    )
+  );
+  const allLatestThreads = latestThreadsByCategory.flat();
+  const allLatestThreadsWithTotals = await attachCommentTotals(allLatestThreads);
+
+  let cursor = 0;
+  const latestThreadsWithTotalsByCategory = latestThreadsByCategory.map((group) => {
+    const slice = allLatestThreadsWithTotals.slice(cursor, cursor + group.length);
+    cursor += group.length;
+    return slice;
+  });
+
+  return categories.map((cat, i) => {
     const { threads, ...rest } = cat;
 
     const totalPosts = threads.length;
@@ -64,6 +154,7 @@ async function getCategories() {
         ? { id: latest.id, title: latest.title, createdAt: latest.createdAt }
         : null,
       lastPostAt: latest ? latest.createdAt : null,
+      latestThreads: latestThreadsWithTotalsByCategory[i] ?? [],
     };
   });
 }
@@ -107,7 +198,7 @@ async function deleteCategory(categoryId) {
 // ─── Threads ──────────────────────────────────────────────────────────────────
 
 async function createThread({ authorId, categoryId, title, context, mediaUrl, isPinned }) {
-  return prisma.thread.create({
+  const thread = await prisma.thread.create({
     data: {
       authorId,
       categoryId: categoryId ?? null,
@@ -122,6 +213,9 @@ async function createThread({ authorId, categoryId, title, context, mediaUrl, is
       _count:   { select: { likes: true, comments: true } },
     },
   });
+  // Brand-new thread — no comments or replies yet, so the total is always 0,
+  // but we keep the same shape (totalCommentCount) the frontend expects.
+  return { ...thread, totalCommentCount: 0 };
 }
 
 async function getThreads({ page = 1, limit = 20, categoryId } = {}) {
@@ -144,17 +238,22 @@ async function getThreads({ page = 1, limit = 20, categoryId } = {}) {
     prisma.thread.count({ where }),
   ]);
 
-  return { threads, total, page, totalPages: Math.ceil(total / limit) };
+  return { threads: await attachCommentTotals(threads), total, page, totalPages: Math.ceil(total / limit) };
 }
 
 /**
- * Threads for the "Latest" tab — newest first, pinned threads excluded
- * so they don't duplicate what's already shown in the Pinned tab.
+ * Threads for the "Latest" tab — threads posted in the last 2 days, newest
+ * first, pinned threads excluded so they don't duplicate the Pinned tab.
  */
 async function getLatestThreads({ page = 1, limit = 20, categoryId } = {}) {
   const skip = (page - 1) * limit;
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
 
-  const where = { isPinned: false, ...(categoryId ? { categoryId } : {}) };
+  const where = {
+    isPinned: false,
+    createdAt: { gte: twoDaysAgo },
+    ...(categoryId ? { categoryId } : {}),
+  };
 
   const [threads, total] = await Promise.all([
     prisma.thread.findMany({
@@ -171,7 +270,7 @@ async function getLatestThreads({ page = 1, limit = 20, categoryId } = {}) {
     prisma.thread.count({ where }),
   ]);
 
-  return { threads, total, page, totalPages: Math.ceil(total / limit) };
+  return { threads: await attachCommentTotals(threads), total, page, totalPages: Math.ceil(total / limit) };
 }
 
 /**
@@ -207,7 +306,7 @@ async function getPinnedAndTodayThreads({ limit = 10 } = {}) {
     }),
   ]);
 
-  return [...pinned, ...today].slice(0, limit);
+  return (await attachCommentTotals([...pinned, ...today])).slice(0, limit);
 }
 
 /**
@@ -215,7 +314,7 @@ async function getPinnedAndTodayThreads({ limit = 10 } = {}) {
  * newest pinned first. No mixing with today's/recent threads.
  */
 async function getPinnedThreads({ limit = 10 } = {}) {
-  return prisma.thread.findMany({
+  const threads = await prisma.thread.findMany({
     where: { isPinned: true },
     orderBy: { createdAt: "desc" },
     take: limit,
@@ -225,13 +324,19 @@ async function getPinnedThreads({ limit = 10 } = {}) {
       _count:   { select: { likes: true, comments: true } },
     },
   });
+  return attachCommentTotals(threads);
 }
 
 /**
- * Threads "active" in the last 2 days:
- *   - created in the last 48 hours, OR
- *   - received a comment or reply in the last 48 hours
- * Pinned threads always appear first, then sorted by most recent activity.
+ * "Active" threads — any thread that received a comment or reply in the last
+ * 48 hours, OR was created in the last 48 hours.
+ * Sorted by highest combined engagement (comments + replies) descending so the
+ * busiest threads float to the top. Pinned threads still lead the list.
+ *
+ * Because Prisma can't ORDER BY a computed sum across two relations in one
+ * query, we fetch a reasonable overcount (limit * 4), attach totals, then
+ * sort and slice in JS — this is cheap because the dataset is small (active
+ * window is only 48 h).
  */
 async function getActiveThreads({ limit = 20 } = {}) {
   const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
@@ -241,10 +346,10 @@ async function getActiveThreads({ limit = 20 } = {}) {
       OR: [
         { createdAt: { gte: twoDaysAgo } },
         { comments: { some: { createdAt: { gte: twoDaysAgo } } } },
+        { comments: { some: { replies: { some: { createdAt: { gte: twoDaysAgo } } } } } },
       ],
     },
-    orderBy: [{ isPinned: "desc" }, { createdAt: "desc" }],
-    take: limit,
+    take: limit * 4, // overfetch so sorting has enough to work with
     include: {
       author:   { select: AUTHOR_SELECT },
       category: { select: { id: true, name: true, slug: true } },
@@ -252,11 +357,19 @@ async function getActiveThreads({ limit = 20 } = {}) {
     },
   });
 
-  return threads;
+  const withTotals = await attachCommentTotals(threads);
+
+  // Sort: pinned first, then by totalCommentCount desc (comments + replies)
+  withTotals.sort((a, b) => {
+    if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+    return (b.totalCommentCount ?? 0) - (a.totalCommentCount ?? 0);
+  });
+
+  return withTotals.slice(0, limit);
 }
 
 async function getThread(threadId) {
-  return prisma.thread.findUnique({
+  const thread = await prisma.thread.findUnique({
     where: { id: threadId },
     include: {
       author:   { select: AUTHOR_SELECT },
@@ -264,17 +377,18 @@ async function getThread(threadId) {
       _count:   { select: { likes: true, comments: true } },
     },
   });
+  return attachCommentTotal(thread);
 }
 
 async function findThread(threadId) {
   return prisma.thread.findUnique({
     where: { id: threadId },
-    select: { id: true, authorId: true, mediaUrl: true, categoryId: true },
+    select: { id: true, authorId: true, title: true, mediaUrl: true, categoryId: true },
   });
 }
 
 async function updateThread(threadId, { title, context, mediaUrl, isPinned, categoryId }) {
-  return prisma.thread.update({
+  const thread = await prisma.thread.update({
     where: { id: threadId },
     data: {
       ...(title      !== undefined && { title }),
@@ -289,6 +403,7 @@ async function updateThread(threadId, { title, context, mediaUrl, isPinned, cate
       _count:   { select: { likes: true, comments: true } },
     },
   });
+  return attachCommentTotal(thread);
 }
 
 async function deleteThread(threadId) {
@@ -432,7 +547,7 @@ async function addReply(commentId, authorId, content, mediaUrls = []) {
 // ─── Daily challenge thread ───────────────────────────────────────────────────
 
 async function getDailyThread() {
-  return prisma.thread.findFirst({
+  const thread = await prisma.thread.findFirst({
     where: {
       isPinned: true,
       title:    { contains: "Daily Writing", mode: "insensitive" },
@@ -444,6 +559,7 @@ async function getDailyThread() {
     },
     orderBy: { createdAt: "desc" },
   });
+  return attachCommentTotal(thread);
 }
 
 async function findReply(replyId) {

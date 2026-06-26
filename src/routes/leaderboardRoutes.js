@@ -10,6 +10,10 @@ const leaderboardController = require("../controllers/leaderboardController");
 // GET /api/leaderboard
 router.get("/", leaderboardController.getHomepageLeaderboards);
 
+// Recent activity for homepage (thread commenters today; sprinters + critiquers last 2 days)
+// GET /api/leaderboard/homepage-activity
+router.get("/homepage-activity", leaderboardController.getHomepageRecentActivity);
+
 // Individual leaderboard endpoints
 // GET /api/leaderboard/critiquers
 router.get("/critiquers", leaderboardController.getTopCritiquers);

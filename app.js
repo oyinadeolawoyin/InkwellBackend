@@ -4,17 +4,20 @@ const app = express();
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const multer = require("multer");
-require("./jobs/scheduledjobs");
+// require("./jobs/scheduledjobs");
 const { startChallengeCron } = require("./jobs/challengecron");
+const { startDaysChallengeCron } = require("./jobs/dayschallengeexpirycron");
+const { startDaysChallengeReminderCron } = require("./jobs/dayschallengeremindercron");
+const { startDraftPlanReminderCron } = require("./jobs/draftplanremindercron");
+const { startSprintReminderCron } = require("./jobs/sprintremindercron");
+
 const rateLimit = require("express-rate-limit");
 
 const authRoutes        = require("./src/routes/authRoutes");
 const groupSprintRoutes = require("./src/routes/groupSprintRoutes");
 const userRoutes        = require("./src/routes/userRoutes");
-const emotionRoutes     = require("./src/routes/emotionRoutes");
 const notificationRoutes = require("./src/routes/notificationRoutes");
 const blogRoutes        = require("./src/routes/blogRoutes");
-const snippetRoutes     = require("./src/routes/snippetroutes");
 const soundscapesRoutes = require("./src/routes/soundscaperoutes");
 const feedbackRoutes    = require("./src/routes/feedbackRoutes"); 
 const discoveryRoutes = require("./src/routes/discoveryroutes");
@@ -23,6 +26,10 @@ const draftRoutes = require("./src/routes/draftroutes");
 const reportRoutes = require("./src/routes/reportRoutes");
 const challengeRoutes = require("./src/routes/challengeroutes");
 const threadRoutes = require("./src/routes/threadroutes");
+const draftPlanRoutes = require("./src/routes/draftplanroutes");
+const dayChallengeRoutes = require("./src/routes/dayschallengeroutes");
+const directMessageRoutes = require("./src/routes/directmessageroutes");
+const profileRoutes = require("./src/routes/profileroutes");
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -42,15 +49,16 @@ app.use(cookieParser());
 // });
 
 // app.use("/api/", limiter); // applies to all your API routes
-startChallengeCron();
+startDaysChallengeCron();
+startDaysChallengeReminderCron();
+startDraftPlanReminderCron();
+startSprintReminderCron();
 
 app.use("/api/auth",          authRoutes);
 app.use("/api/sprint",        groupSprintRoutes);
 app.use("/api/users",         userRoutes);
-app.use("/api/emotions",       emotionRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/blog",          blogRoutes);
-app.use("/api/snippets",      snippetRoutes);
 app.use("/api/soundscapes",   soundscapesRoutes);
 app.use("/api/feedback",      feedbackRoutes); 
 app.use("/api/discovery", discoveryRoutes);
@@ -59,6 +67,10 @@ app.use("/api/drafts", draftRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/challenge", challengeRoutes);
 app.use("/api/threads", threadRoutes);
+app.use("/api/draftplan", draftPlanRoutes);
+app.use("/api/days-challenge", dayChallengeRoutes);
+app.use("/api/direct-messages", directMessageRoutes);
+app.use("/api/profile", profileRoutes);
 
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError || err.message === "Unsupported file type") {

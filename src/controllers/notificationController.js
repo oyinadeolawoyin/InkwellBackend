@@ -154,6 +154,100 @@ async function saveSprintReminderOptIn(req, res) {
   }
 }
 
+const prisma = require("../config/prismaClient");
+
+/**
+ * GET /notifications/unread-counts
+ *
+ * Returns unread counts for all three sidebar badges:
+ *   {
+ *     notifications: number,   // Notification rows where read = false
+ *     messages: number,        // Conversations with a message newer than lastReadByA/B
+ *     communityUpdates: number // BlogPosts newer than the user's lastSeenAt
+ *   }
+ *
+ * Called by the sidebar on mount and whenever the window regains focus.
+ */
+async function getUnreadCounts(req, res) {
+  try {
+    const userId = Number(req.user.id);
+
+    // ── 1. Unread notifications ───────────────────────────────────────────
+    // Excludes MESSAGE / COMMUNITY_UPDATE so this badge count always matches
+    // what the bell page (fetchNotifications) actually displays — those two
+    // types have their own dedicated pages + badges below.
+    const notificationCount = await prisma.notification.count({
+      where: {
+        userId,
+        read: false,
+        type: { notIn: ["MESSAGE", "COMMUNITY_UPDATE"] },
+      },
+    });
+
+    // ── 2. Unread message conversations ──────────────────────────────────
+    // A conversation is "unread" for this user if:
+    //   - The latest non-deleted message was NOT sent by them, AND
+    //   - That message's createdAt is newer than their lastReadByA/B cursor
+    //
+    // Strategy: fetch all conversations for this user, then count the ones
+    // where the latest message beats their read cursor.
+    const conversations = await prisma.directConversation.findMany({
+      where: {
+        OR: [{ userAId: userId }, { userBId: userId }],
+      },
+      select: {
+        userAId:     true,
+        userBId:     true,
+        lastReadByA: true,
+        lastReadByB: true,
+        messages: {
+          where:   { deletedAt: null },
+          orderBy: { createdAt: "desc" },
+          take:    1,
+          select:  { senderId: true, createdAt: true },
+        },
+      },
+    });
+
+    let messageCount = 0;
+    for (const conv of conversations) {
+      const latest = conv.messages[0];
+      if (!latest) continue;
+      // Skip messages the user sent themselves
+      if (latest.senderId === userId) continue;
+
+      const isUserA    = conv.userAId === userId;
+      const myLastRead = isUserA ? conv.lastReadByA : conv.lastReadByB;
+
+      // Unread if no read cursor, or latest message arrived after last read
+      if (!myLastRead || latest.createdAt > myLastRead) {
+        messageCount++;
+      }
+    }
+
+    // ── 3. Unseen community updates ───────────────────────────────────────
+    const lastSeen = await prisma.blogLastSeen.findUnique({
+      where:  { userId },
+      select: { lastSeenAt: true },
+    });
+
+    const communityUpdateCount = await prisma.blogPost.count({
+      where: lastSeen
+        ? { createdAt: { gt: lastSeen.lastSeenAt } }
+        : {}, // never visited → all posts are "new"
+    });
+
+    res.status(200).json({
+      notifications:    notificationCount,
+      messages:         messageCount,
+      communityUpdates: communityUpdateCount,
+    });
+  } catch (error) {
+    console.error("Get unread counts error:", error);
+    res.status(500).json({ message: "Failed to fetch unread counts" });
+  }
+}
+
 // ============================================
 // EXPORTS
 // ============================================
@@ -166,4 +260,5 @@ module.exports = {
     getPreferences,
     getSprintReminderOptIn,
     saveSprintReminderOptIn,
+    getUnreadCounts
 };

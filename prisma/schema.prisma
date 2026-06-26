@@ -33,6 +33,11 @@ model User {
 
   referralSource   String?   // "how did you find us" answer at signup
   socialLinks      Json?     // [{ platform: "Twitter", url: "https://..." }, ...]
+  projectType      String?   // "novel" | "fanfic" | "short_story" | "other"
+  timeOnProject    String?   // "less_1month" | "1_6months" | "6_12months" | "over_1year"
+  biggestBlock     String? 
+  
+  blogLastSeen  BlogLastSeen?
 
   challengeLongestStreak   Int     @default(0)  
 
@@ -48,19 +53,9 @@ model User {
   blogPostLikes       BlogPostLike[]
   blogComments        BlogComment[]
   blogReplies         BlogReply[]
-  writingSnippets     WritingSnippet[]
-  snippetLikes        SnippetLike[]
-  snippetComments     SnippetComment[]
-  snippetReplies      SnippetReply[]
-  snippetCommentLikes SnippetCommentLike[]
-  snippetReplyLikes   SnippetReplyLike[]
-  wallPostsAuthored   WallPost[]           @relation("WallPostAuthor")
-  wallPostsReceived   WallPost[]           @relation("WallPostProfile")
-  wallPostLikes       WallPostLike[]
-  wallPostComments    WallPostComment[]
-  wallPostReplies     WallPostReply[]
   soundscapes         Soundscape[]
   writingDrafts       WritingDraft[]
+  
 
   // ── feedback hub relations ──────────────────────────────────────────────
   feedbackPoints              FeedbackPoint?
@@ -73,16 +68,13 @@ model User {
   critiqueReportsSubmitted    CritiqueReport[]  @relation("ReportSubmitter")
   critiqueReportsResolved     CritiqueReport[]  @relation("ReportResolver")
 
-  discoveryStories            DiscoveryStory[]
-  discoveryLikes              DiscoveryLike[]
-
-  // ── emotion relations ────────────────────────────────────────────────────
-  emotionLikes                EmotionLike[]
-  emotionComments             EmotionComment[]
-  emotionCommentLikes         EmotionCommentLike[]
-
   blocksMade      UserBlock[]  @relation("BlocksMade")
   blocksReceived  UserBlock[]  @relation("BlocksReceived")
+
+  // ── Direct Message relations ──────────────────────────────────────────────
+  directConversationsAsA  DirectConversation[] @relation("ConversationUserA")
+  directConversationsAsB  DirectConversation[] @relation("ConversationUserB")
+  sentMessages            DirectMessage[]      @relation("MessageSender")
 
   // ── thread relations ─────────────────────────────────────────────────────
   threads             Thread[]
@@ -91,6 +83,14 @@ model User {
   threadCommentLikes  ThreadCommentLike[]
   threadReplies       ThreadReply[]
   threadReplyLikes    ThreadReplyLike[]
+
+  // ── draft plan relations ─────────────────────────────────────────────────
+  draftPlan            DraftPlan?
+  draftProgressLogs    DraftProgressLog[]
+
+  // ── days challenge relations ─────────────────────────────────────────────
+  daysChallenge        DaysChallenge?
+  daysChallengeCheckIns DaysChallengeCheckIn[]
 }
 
 model UserBlock {
@@ -225,92 +225,6 @@ model Soundscape {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WRITING SNIPPET
-// ─────────────────────────────────────────────────────────────────────────────
-
-model WritingSnippet {
-  id         Int           @id @default(autoincrement())
-  userId     Int
-  context    String?
-  mediaUrl   String?
-  sourceType SnippetSource @default(POST_SPRINT)
-  tags       String?
-  createdAt  DateTime      @default(now())
-
-  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  likes      SnippetLike[]
-  comments   SnippetComment[]
-
-  @@index([userId])
-  @@index([createdAt])
-}
-
-model SnippetLike {
-  id        Int            @id @default(autoincrement())
-  userId    Int
-  snippetId Int
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  snippet   WritingSnippet @relation(fields: [snippetId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, snippetId])
-  @@index([snippetId])
-}
-
-model SnippetComment {
-  id        Int            @id @default(autoincrement())
-  userId    Int?                                                          // <-- nullable
-  snippetId Int
-  content   String
-  createdAt DateTime       @default(now())
-
-  likes     SnippetCommentLike[]
-  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull) // <-- SetNull
-  snippet   WritingSnippet @relation(fields: [snippetId], references: [id], onDelete: Cascade)
-  replies   SnippetReply[]
-
-  @@index([snippetId])
-  @@index([userId])
-}
-
-
-model SnippetReply {
-  id        Int            @id @default(autoincrement())
-  userId    Int?                                                          // <-- nullable
-  commentId Int
-  content   String
-  createdAt DateTime       @default(now())
-
-  likes     SnippetReplyLike[]
-  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull) // <-- SetNull
-  comment   SnippetComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
-
-  @@index([commentId])
-  @@index([userId])
-}
-
-model SnippetCommentLike {
-  id        Int            @id @default(autoincrement())
-  userId    Int
-  commentId Int
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  comment   SnippetComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, commentId])
-  @@index([commentId])
-}
-
-model SnippetReplyLike {
-  id      Int          @id @default(autoincrement())
-  userId  Int
-  replyId Int
-  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reply   SnippetReply @relation(fields: [replyId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, replyId])
-  @@index([replyId])
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // QUOTES, SUBSCRIPTIONS, NOTIFICATIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -344,17 +258,34 @@ model Subscription {
 }
 
 model Notification {
-  id        Int      @id @default(autoincrement())
+  id        Int              @id @default(autoincrement())
   username  String
   userId    Int
   message   String?
   link      String?
-  read      Boolean? @default(false)
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  read      Boolean?         @default(false)
+  type      NotificationType @default(GENERAL)
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([userId, read])
+  @@index([userId, type])
+}
+
+// Used to filter what shows up on the main /notifications bell page.
+// MESSAGE and COMMUNITY_UPDATE are reserved for completeness (e.g. future
+// "all activity" views) but notifyUser() currently skips creating an inbox
+// row for those two types entirely — they're represented by the dedicated
+// Messages and Community Updates pages + sidebar badges instead.
+enum NotificationType {
+  GENERAL           // catch-all / legacy rows created before this field existed
+  REACTION          // likes on posts, comments, threads, etc.
+  COMMENT           // someone commented/replied on the user's content
+  CRITIQUE          // feedback hub activity (new response, report resolved, etc.)
+  MESSAGE           // new direct message — reserved, not currently written to inbox
+  COMMUNITY_UPDATE  // new blog/community post — reserved, not currently written to inbox
+  SYSTEM            // account/admin-level notices
 }
 
 model NotificationPreference {
@@ -379,6 +310,7 @@ model BlogPost {
   mediaUrl  String?
   link      String?
   category  String?
+  tag       String?
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
   likes     BlogPostLike[]
@@ -459,6 +391,16 @@ model BlogReply {
 
   @@index([commentId])
   @@index([authorId])
+}
+
+model BlogLastSeen {
+  id         Int      @id @default(autoincrement())
+  userId     Int      @unique
+  lastSeenAt DateTime @default(now())
+
+  user  User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -592,63 +534,295 @@ model ThreadReplyLike {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WALL POST
+// DRAFT PLAN
+// ─────────────────────────────────────────────────────────────────────────────
+// A writer's personalised drafting plan, created through the three-step
+// onboarding flow. One active plan per writer at a time (enforced in service).
 // ─────────────────────────────────────────────────────────────────────────────
 
-model WallPost {
-  id        Int      @id @default(autoincrement())
-  authorId  Int?                                                          // <-- nullable
-  profileId Int
-  content   String
+model DraftPlan {
+  id               Int      @id @default(autoincrement())
+  userId           Int      @unique   // one active plan per writer
+
+  // ── Step 1 — The Math Layer ──────────────────────────────────────────────
+  storyTitle       String   // Step 3 — name of their story (stored here for convenience)
+  premise          String   // Step 3 — story premise
+
+  wordsWrittenSoFar   Int              // starting word count at plan creation
+  targetLength        Int              // overall project goal in words
+  goalType            DraftGoalType    // WORDS | CHAPTERS | SCENES
+  dailyGoal           Int              // reduced expectation value (words/chapters/scenes per day)
+  writingDays         DraftWritingDay[] // which days they typically write
+
+  // ── Step 2 — The Emotional Layer ────────────────────────────────────────
+  whyFinish        String   // why they want to finish the draft
+  whatItMeans      String   // what finishing means to them
+  dailyTreat       String   // reward for hitting daily goal
+  weeklyTreat      String   // reward for hitting weekly goal
+  inspirationSource String  // where they get story inspiration
+
+  // ── Images & Characters ──────────────────────────────────────────────────
+  // Up to 5 moodboard/character art images stored as URL strings in Json array
+  moodboardImages  Json     @default("[]")   // String[] — up to 5 URLs
+
+  // ── Computed / Derived ───────────────────────────────────────────────────
+  estimatedDays    Int      // days to finish at daily goal, calculated at creation
+  weeklyGoal       Int      // dailyGoal * active writing days per week
+
+  // ── Status ───────────────────────────────────────────────────────────────
+  isCompleted      Boolean  @default(false)
+  completedAt      DateTime?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  characters       DraftPlanCharacter[]
+  progressLogs     DraftProgressLog[]
+
+  @@index([userId])
+  @@index([isCompleted])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DRAFT PLAN CHARACTER
+// Up to 5 characters per plan. Name + short description (≤50 chars).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DraftPlanCharacter {
+  id          Int      @id @default(autoincrement())
+  planId      Int
+  name        String
+  description String   // max 50 chars — enforced in service
+
+  plan        DraftPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DRAFT PROGRESS LOG
+// One row each time a writer logs their daily progress against their plan.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DraftProgressLog {
+  id             Int      @id @default(autoincrement())
+  planId         Int
+  userId         Int
+  logDate        DateTime // calendar date stored as midnight UTC
+  countLogged    Int      // words/chapters/scenes logged for this day
+  isPickedDay    Boolean  @default(false) // true if this log falls on one of the writer's chosen writing days
+  metDailyGoal   Boolean  @default(false)
+  totalSoFar     Int      // running word count after this log (wordsWrittenSoFar + all logs)
+  note           String?  // optional writer note for the day
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  plan           DraftPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // One log per plan per calendar day
+  @@unique([planId, logDate])
+  @@index([planId])
+  @@index([userId])
+  @@index([logDate])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DRAFT WRITING DAY  (join table — which days of the week the writer is active)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DraftWritingDay {
+  id              Int      @id @default(autoincrement())
+  planId          Int
+  day             WeekDay
+  reminderTime    String   // "HH:MM" in writer's local time, display-only
+  reminderTimeUTC String   // "HH:MM" UTC, used by the reminder cron
+  plan            DraftPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  @@unique([planId, day])
+  @@index([planId])
+  @@index([reminderTimeUTC, day]) // speeds up the cron's per-minute scan
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DIRECT MESSAGES
+// A private two-person chat between any two members.
+//
+// Each pair of users gets exactly one Conversation room. The room is keyed on
+// (userAId, userBId) where userAId is always the lower of the two user IDs —
+// this canonical ordering means we can never accidentally create a duplicate
+// room for the same pair.
+//
+// Messages live inside a Conversation. A message may optionally quote one
+// earlier message (quotedMessageId) so the reader knows which message is being
+// replied to. Quoted content is stored as a snapshot (quotedContent,
+// quotedSenderName) so the quote still renders even if the original is deleted.
+//
+// Soft-delete: messages are never hard-deleted. deletedAt is set instead, and
+// the API returns placeholder text ("This message was deleted") in that case.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DirectConversation {
+  id      Int @id @default(autoincrement())
+
+  // Always stored with userAId < userBId — enforced in the service layer.
+  // The @@unique below prevents duplicate rooms for the same pair.
+  userAId Int
+  userBId Int
+
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  author   User?             @relation("WallPostAuthor", fields: [authorId], references: [id], onDelete: SetNull) // <-- SetNull
-  profile  User              @relation("WallPostProfile", fields: [profileId], references: [id], onDelete: Cascade)
-  likes    WallPostLike[]
-  comments WallPostComment[]
+  // Per-participant read cursor.
+  // Set to now() when that user opens the conversation.
+  // A conversation is "unread" for userA if lastReadByA < the latest message's createdAt.
+  lastReadByA  DateTime?
+  lastReadByB  DateTime?
 
-  @@index([profileId])
-  @@index([authorId])
+  userA    User             @relation("ConversationUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB    User             @relation("ConversationUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  messages DirectMessage[]
+
+  @@unique([userAId, userBId])
+  @@index([userAId])
+  @@index([userBId])
 }
 
-model WallPostLike {
-  id         Int      @id @default(autoincrement())
-  userId     Int
-  wallPostId Int
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  wallPost   WallPost @relation(fields: [wallPostId], references: [id], onDelete: Cascade)
+model DirectMessage {
+  id             Int      @id @default(autoincrement())
+  conversationId Int
+  senderId       Int
+  content        String
 
-  @@unique([userId, wallPostId])
-  @@index([wallPostId])
+  // Quote / reply context — optional
+  // When a user replies to a specific message we store the ID of the original
+  // message plus a snapshot of its text and sender name. The snapshot means
+  // the quote still shows up even if the original message is later deleted.
+  quotedMessageId   Int?
+  quotedContent     String?  // snapshot of the quoted message's text at send time
+  quotedSenderName  String?  // snapshot of the quoted sender's username at send time
+
+  // Soft delete — we never physically remove messages
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversation   DirectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User               @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  // Self-referential — the message being quoted (for integrity checks only;
+  // the snapshot fields are what we actually render)
+  quotedMessage  DirectMessage?  @relation("MessageQuote", fields: [quotedMessageId], references: [id], onDelete: SetNull)
+  quotedBy       DirectMessage[] @relation("MessageQuote")
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@index([quotedMessageId])
 }
 
-model WallPostComment {
-  id         Int      @id @default(autoincrement())
-  userId     Int?                                                         // <-- nullable
-  wallPostId Int
-  content    String
-  createdAt  DateTime @default(now())
 
-  user     User?           @relation(fields: [userId], references: [id], onDelete: SetNull) // <-- SetNull
-  wallPost WallPost        @relation(fields: [wallPostId], references: [id], onDelete: Cascade)
-  replies  WallPostReply[]
+// ─────────────────────────────────────────────────────────────────────────────
+// DAYS CHALLENGE  (7-day or 15-day focused writing challenge)
+// ─────────────────────────────────────────────────────────────────────────────
+// Completely separate from the existing ChallengeParticipation system.
+// Writers join for a specific focus (up to 2) — editing, outlining,
+// brainstorming, or story development. They set a daily goal in words or
+// minutes. One active challenge per writer at a time.
+//
+// Lifecycle:
+//   ACTIVE   → writer is in progress
+//   COMPLETED → writer marked done early, or hit all days
+//   EXPIRED  → challenge duration passed without completion (cron sets this)
+// ─────────────────────────────────────────────────────────────────────────────
 
-  @@index([wallPostId])
+
+model DaysChallenge {
+  id               Int                    @id @default(autoincrement())
+  userId           Int                    @unique
+
+  duration         DaysChallengeDuration
+  focuses          DaysChallengesFocus[]
+
+  storyTitle       String?
+  workingGoal      String
+  whyNow           String
+
+  goalType         DaysChallengeGoalType
+  dailyGoal        Int
+
+  // ── NEW: daily check-in reminder ────────────────────────────────────────
+  // "HH:MM" in the writer's own local time, display-only.
+  reminderTime     String                 @default("09:00")
+  // "HH:MM" in UTC — derived from reminderTime + the writer's User.timezone
+  // at creation/update time. This is what the cron actually matches on, so
+  // it never has to do timezone math per-tick.
+  reminderTimeUTC  String                 @default("09:00")
+
+  startDate        DateTime               @default(now())
+  endDate          DateTime
+  completedAt      DateTime?
+  expiredAt        DateTime?
+
+  status           DaysChallengeStatus    @default(ACTIVE)
+
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  user             User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checkIns         DaysChallengeCheckIn[]
+
   @@index([userId])
+  @@index([status])
+  @@index([endDate])
+  @@index([createdAt])
+  // NEW — speeds up the per-minute cron scan, same role as the index on
+  // DraftWritingDay(reminderTimeUTC, day).
+  @@index([reminderTimeUTC, status])
 }
 
-model WallPostReply {
-  id        Int             @id @default(autoincrement())
-  userId    Int?                                                          // <-- nullable
-  commentId Int
-  content   String
-  createdAt DateTime        @default(now())
+// ─────────────────────────────────────────────────────────────────────────────
+// DAYS CHALLENGE FOCUS  (join table — up to 2 focus rows per challenge)
+// ─────────────────────────────────────────────────────────────────────────────
 
-  user    User?           @relation(fields: [userId], references: [id], onDelete: SetNull) // <-- SetNull
-  comment WallPostComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+model DaysChallengesFocus {
+  id          Int                   @id @default(autoincrement())
+  challengeId Int
+  focus       DaysChallengeFocus    // OUTLINING | BRAINSTORMING | EDITING | STORY_DEVELOPMENT
 
-  @@index([commentId])
+  challenge   DaysChallenge         @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@unique([challengeId, focus])    // can't pick the same focus twice
+  @@index([challengeId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DAYS CHALLENGE CHECK-IN
+// One row per day a writer logs progress. One per challenge per calendar day
+// (upsertable — they can re-log to correct their count).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DaysChallengeCheckIn {
+  id            Int      @id @default(autoincrement())
+  challengeId   Int
+  userId        Int
+  checkInDate   DateTime // midnight UTC
+  countLogged   Int      // words or minutes depending on goalType
+  metDailyGoal  Boolean  @default(false)
+  note          String?  // optional note for the day
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  challenge     DaysChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([challengeId, checkInDate])  // one check-in per challenge per day
+  @@index([challengeId])
   @@index([userId])
+  @@index([checkInDate])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -862,114 +1036,6 @@ model WritingDraft {
   @@index([userId, isStagedForFeedback])
 }
 
-model DiscoveryStory {
-  id              Int      @id @default(autoincrement())
-  userId          Int
-  title           String
-  genre           String
-  synopsis        String
-  firstChapterTitle String?
-  firstChapter    String
-  coverUrl        String?
-  authorName      String
-  recommendedBy   String?
-  platform        String
-  platformLink    String
-  contentWarnings String[] @default([])
-  isApproved      Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  likes  DiscoveryLike[]
-
-  @@index([userId])
-  @@index([isApproved])
-  @@index([createdAt])
-  @@index([genre])
-}
-
-model DiscoveryLike {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  storyId   Int
-  createdAt DateTime @default(now())
-
-  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  story DiscoveryStory @relation(fields: [storyId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, storyId])
-  @@index([storyId])
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CRAFT LEARNING — Emotion Thesaurus daily feature
-// ─────────────────────────────────────────────────────────────────────────────
-
-model EmotionEntry {
-  id          Int      @id @default(autoincrement())
-  emotion     String   // e.g. "Anxiety"
-  cues        String[] // physical signal phrases
-  scheduledAt DateTime @unique // which day this emotion is shown
-  createdAt   DateTime @default(now())
-
-  likes       EmotionLike[]
-  comments    EmotionComment[]
-
-  @@index([scheduledAt])
-}
-
-model EmotionTemplate {
-  id        Int      @id @default(autoincrement())
-  emotion   String
-  cues      String[]
-  sortOrder Int      @unique  // 1, 2, 3 … determines the cycle order
-
-  @@index([sortOrder])
-}
-
-model EmotionLike {
-  id      Int          @id @default(autoincrement())
-  userId  Int
-  entryId Int
-  createdAt DateTime   @default(now())
-
-  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  entry   EmotionEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, entryId])
-  @@index([entryId])
-}
-
-model EmotionComment {
-  id        Int          @id @default(autoincrement())
-  entryId   Int
-  authorId  Int?
-  content   String
-  isPinned  Boolean      @default(false)
-  createdAt DateTime     @default(now())
-
-  entry   EmotionEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  author  User?        @relation(fields: [authorId], references: [id], onDelete: SetNull)
-  likes   EmotionCommentLike[]
-
-  @@index([entryId])
-  @@index([authorId])
-}
-
-model EmotionCommentLike {
-  id        Int            @id @default(autoincrement())
-  userId    Int
-  commentId Int
-  createdAt DateTime       @default(now())
-
-  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  comment EmotionComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, commentId])
-  @@index([commentId])
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // ENUMS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -979,12 +1045,6 @@ enum Role {
   ADMIN
   SPONSOR
   FOUNDING_WRITER
-}
-
-enum SnippetSource {
-  POST_SPRINT
-  STANDALONE
-  DAYS_CHALLENGE
 }
 
 enum Visibility {
@@ -1028,4 +1088,44 @@ enum GoalType {
   CHAPTERS
   SCENES
   DURATION   // stored in minutes
+}
+
+enum DraftGoalType {
+  WORDS
+  CHAPTERS
+  SCENES
+}
+
+enum WeekDay {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+
+enum DaysChallengeDuration {
+  SEVEN
+  FIFTEEN
+}
+
+enum DaysChallengeGoalType {
+  WORDS
+  DURATION   // stored in minutes
+}
+
+enum DaysChallengeStatus {
+  ACTIVE
+  COMPLETED
+  EXPIRED
+}
+
+enum DaysChallengeFocus {
+  OUTLINING
+  BRAINSTORMING
+  EDITING
+  STORY_DEVELOPMENT
 }

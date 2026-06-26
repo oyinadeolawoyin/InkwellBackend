@@ -53,15 +53,17 @@ async function sendPushNotification(subscription, payload) {
  * @param {string} notificationData.link - URL link for notification
  * @param {string} notificationData.message - Notification message
  * @param {number} notificationData.userId - User ID of recipient
+ * @param {string} [notificationData.type] - NotificationType enum value (defaults to GENERAL)
  * @returns {Promise<Object>} Created notification object
  */
-async function addNotification({ username, link, message, userId }) {
+async function addNotification({ username, link, message, userId, type }) {
   return await prisma.notification.create({
     data: {
       username,
       message,
       link,
-      userId
+      userId,
+      ...(type && { type }),
     }
   });
 }
@@ -101,6 +103,20 @@ async function savePreferences(userId, preferences) {
 
 // ==================== Preference-Aware notifyUser ====================
 
+// Types that have their own dedicated page + sidebar badge (Messages,
+// Community Updates) instead of the bell/inbox page. For these we still
+// want push + email to respect preferences, but we never want a row to
+// show up in the main notifications list — that would just duplicate what
+// the dedicated page already shows.
+const INBOX_EXCLUDED_TYPES = new Set(["MESSAGE", "COMMUNITY_UPDATE"]);
+
+// Preference keys that default to OFF for push/email unless the user has
+// explicitly opted in (the opposite of notifyUser()'s normal "send
+// everything unless told not to" default). Community updates go out to
+// every user on the site per post, so unlike a single-recipient notice
+// (a reply, a DM) this one should be opt-in, not opt-out.
+const OPT_IN_REQUIRED_KEYS = new Set(["community_new_post"]);
+
 /**
  * Notify a user through multiple channels, respecting their preferences.
  *
@@ -109,26 +125,46 @@ async function savePreferences(userId, preferences) {
  * @param {string} link          - URL related to the notification
  * @param {string} [notifKey]    - Preference key (e.g. "discovery_story_liked").
  *                                  When omitted every channel fires (backward-compat).
+ * @param {string} [type]        - NotificationType enum value, e.g. "MESSAGE",
+ *                                  "COMMUNITY_UPDATE", "REACTION", "COMMENT",
+ *                                  "CRITIQUE", "SYSTEM". Defaults to "GENERAL".
+ *                                  MESSAGE and COMMUNITY_UPDATE never create an
+ *                                  inbox row (see INBOX_EXCLUDED_TYPES) — they're
+ *                                  represented by their own page + badge instead.
  */
-async function notifyUser(user, message, link, notifKey = null) {
-  // Resolve channel permissions from saved preferences
+async function notifyUser(user, message, link, notifKey = null, type = "GENERAL") {
+  // Resolve channel permissions from saved preferences.
+  // Opt-in-required keys (e.g. community_new_post) start with push/email OFF;
+  // everything else starts ON. Either way, an explicit saved preference always
+  // wins below.
+  const optInRequired = notifKey && OPT_IN_REQUIRED_KEYS.has(notifKey);
+
   let allowInbox = true;
-  let allowPush  = true;
-  let allowEmail = true;
+  let allowPush  = !optInRequired;
+  let allowEmail = !optInRequired;
 
   if (notifKey) {
     try {
       const record = await fetchPreferences(user.id);
       if (record && record.preferences && record.preferences[notifKey]) {
         const p = record.preferences[notifKey];
-        allowInbox = p.inbox  !== false;
-        allowPush  = p.push   !== false;
-        allowEmail = p.email  !== false;
+        // Explicit true/false in the saved record always overrides the
+        // default above; only an *absent* key falls back to the default.
+        if (p.inbox !== undefined) allowInbox = p.inbox !== false;
+        if (p.push  !== undefined) allowPush  = p.push  === true;
+        if (p.email !== undefined) allowEmail = p.email === true;
       }
     } catch (err) {
-      // If preference lookup fails, default to sending everything
+      // If preference lookup fails, fall back to the safe default for this
+      // key (opt-in keys stay off; everything else stays on).
       console.error("Preference lookup error:", err);
     }
+  }
+
+  // Types with their own dedicated page (Messages, Community Updates) never
+  // get an inbox row, no matter what the saved preference says.
+  if (INBOX_EXCLUDED_TYPES.has(type)) {
+    allowInbox = false;
   }
 
   // 1. In-app inbox
@@ -138,6 +174,7 @@ async function notifyUser(user, message, link, notifKey = null) {
       message,
       link,
       userId: Number(user.id),
+      type,
     });
   }
 
@@ -186,27 +223,40 @@ async function saveSubscription(userId, subscription) {
 
 
 /**
- * Get all notifications for a user
+ * Get all notifications for a user, for the main bell/inbox page.
+ * Excludes MESSAGE and COMMUNITY_UPDATE types — those have their own
+ * dedicated pages (Messages, Community Updates) and sidebar badges, so
+ * showing them here too would just be duplicate noise. In practice
+ * notifyUser() never writes those types to the inbox in the first place;
+ * this filter is just a safety net.
  * @param {number} userId - User ID
  * @returns {Promise<Array>} Array of notification objects
  */
-async function fetchNotifications(userId) { 
+async function fetchNotifications(userId) {
   return await prisma.notification.findMany({
-    where: { userId: Number(userId) },
+    where: {
+      userId: Number(userId),
+      type: { notIn: ["MESSAGE", "COMMUNITY_UPDATE"] },
+    },
     orderBy: { id: "desc" } // Latest first
   });
 }
 
 /**
- * Mark a notification as read
- * @param {number} notificationId - Notification ID
- * @returns {Promise<Object>} Updated notification object
+ * Mark all of a user's bell-page notifications as read.
+ * Same type exclusion as fetchNotifications, so this only ever touches rows
+ * the bell page actually shows — it can't silently flip the read state on
+ * MESSAGE/COMMUNITY_UPDATE rows that belong to other pages.
+ * @param {number} userId - User ID
+ * @returns {Promise<Object>} Prisma batch update result
  */
 async function markNotificationRead(userId) {
   return await prisma.notification.updateMany({
-    where: { 
+    where: {
       userId,
-      read: false },
+      read: false,
+      type: { notIn: ["MESSAGE", "COMMUNITY_UPDATE"] },
+    },
     data: { read: true },
   });
 }

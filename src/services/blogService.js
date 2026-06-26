@@ -8,7 +8,7 @@ const AUTHOR_SELECT = {
 
 // ─── Posts ────────────────────────────────────────────────────────────────────
 
-async function createPost({ title, content, mediaUrl, link, seriesId, seriesOrder, category }) {
+async function createPost({ title, content, mediaUrl, link, seriesId, seriesOrder, category, tag }) {
   let resolvedSeriesId = seriesId ?? null;
   let resolvedSeriesOrder = null;
 
@@ -29,6 +29,7 @@ async function createPost({ title, content, mediaUrl, link, seriesId, seriesOrde
       seriesOrder: resolvedSeriesOrder,
       isPinned: false,
       category: category || null,
+      tag: tag || null,
     },
     include: {
       _count: { select: { likes: true, comments: true } },
@@ -37,9 +38,23 @@ async function createPost({ title, content, mediaUrl, link, seriesId, seriesOrde
   });
 }
 
-async function getPosts({ page = 1, limit = 10, category } = {}) {
+async function getPinnedPosts() {
+  return prisma.blogPost.findMany({
+    where: { isPinned: true },
+    orderBy: { createdAt: "desc" },
+    include: {
+      _count: { select: { likes: true, comments: true } },
+      series: { select: { id: true, title: true, slug: true } },
+    },
+  });
+}
+
+async function getPosts({ page = 1, limit = 10, category, tag } = {}) {
   const skip = (page - 1) * limit;
-  const where = category ? { category } : {};
+  const where = {
+    ...(category ? { category } : {}),
+    ...(tag ? { tag } : {}),
+  };
 
   const [posts, total] = await Promise.all([
     prisma.blogPost.findMany({
@@ -90,13 +105,14 @@ async function getPost(postId) {
   return { ...post, previousPost, nextPost };
 }
 
-async function updatePost(postId, { title, content, mediaUrl, link, seriesId, seriesOrder, category }) {
+async function updatePost(postId, { title, content, mediaUrl, link, seriesId, seriesOrder, category, tag }) {
   const data = {
     ...(title !== undefined && { title }),
     ...(content !== undefined && { content }),
     ...(mediaUrl !== undefined && { mediaUrl }),
     ...(link !== undefined && { link }),
     ...(category !== undefined && { category: category || null }),
+    ...(tag !== undefined && { tag: tag || null }),
   };
 
   if (seriesId !== undefined) {
@@ -356,9 +372,22 @@ async function getUserById(userId) {
   });
 }
 
+/**
+ * Upsert the user's "last seen community updates" timestamp to now.
+ * Called when the user visits /community-update.
+ */
+async function markCommunityUpdatesRead(userId) {
+  return prisma.blogLastSeen.upsert({
+    where:  { userId },
+    update: { lastSeenAt: new Date() },
+    create: { userId, lastSeenAt: new Date() },
+  });
+}
+
 module.exports = {
   createPost,
   getPosts,
+  getPinnedPosts,
   getPost,
   updatePost,
   deletePost,
@@ -383,4 +412,6 @@ module.exports = {
   findSeries,
   updateSeries,
   deleteSeries,
+
+  markCommunityUpdatesRead
 };

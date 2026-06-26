@@ -19,8 +19,13 @@ router.post("/series", authenticateJWT, upload.single("cover"), blogController.c
 router.put("/series/:seriesId", authenticateJWT, upload.single("cover"), blogController.updateSeries);
 router.delete("/series/:seriesId", authenticateJWT, blogController.deleteSeries);
 
+// POST /blog/mark-seen
+// Call this on the CommunityUpdatePage's useEffect to clear the badge.
+router.post("/mark-seen", authenticateJWT, blogController.markCommunityUpdatesRead)
+
 // ─── Posts (public read, admin write) ────────────────────────────────────────
 
+router.get("/pinned", blogController.getPinnedPosts);
 router.get("/", blogController.getPosts);
 router.get("/:postId", blogController.getPost);
 
@@ -41,5 +46,6 @@ router.delete("/:postId/comments/:commentId", authenticateJWT, blogController.de
 router.get("/:postId/comments/:commentId/replies", blogController.getReplies);
 router.post("/:postId/comments/:commentId/replies", authenticateJWT, blogController.addReply);
 router.delete("/:postId/comments/:commentId/replies/:replyId", authenticateJWT, blogController.deleteReply);
+
 
 module.exports = router;

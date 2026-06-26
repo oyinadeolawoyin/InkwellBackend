@@ -1,0 +1,312 @@
+// src/services/directMessageService.js
+const prisma = require("../config/prismaClient");
+const { notifyUser } = require("./notificationService");
+
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+
+const MESSAGE_PAGE_SIZE = 30; // messages per page, newest-first
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+
+// Canonical pair ordering: always store the lower ID as userAId.
+// This means the pair (3, 7) and the pair (7, 3) map to the same room.
+function orderedPair(idA, idB) {
+  return idA < idB
+    ? { userAId: idA, userBId: idB }
+    : { userAId: idB, userBId: idA };
+}
+
+// Shape a raw message row into what the API returns.
+// Replaces the content of soft-deleted messages with a placeholder.
+function formatMessage(msg) {
+  const isDeleted = !!msg.deletedAt;
+  return {
+    id:               msg.id,
+    conversationId:   msg.conversationId,
+    senderId:         msg.senderId,
+    senderUsername:   msg.sender?.username ?? null,
+    senderAvatar:     msg.sender?.avatar   ?? null,
+    content:          isDeleted ? null : msg.content,
+    isDeleted,
+    // Quote context — only shown if this message is replying to another
+    quotedMessage: msg.quotedMessageId
+      ? {
+          id:         msg.quotedMessageId,
+          content:    msg.quotedContent   ?? null, // snapshot
+          senderName: msg.quotedSenderName ?? null, // snapshot
+        }
+      : null,
+    createdAt: msg.createdAt,
+    updatedAt: msg.updatedAt,
+  };
+}
+
+// ─── CONVERSATIONS ────────────────────────────────────────────────────────────
+
+// Get or create the conversation room between two users.
+// Returns the conversation with a preview of the most recent message.
+async function getOrCreateConversation(requestingUserId, otherUserId) {
+  if (requestingUserId === otherUserId)
+    throw new Error("You can't start a conversation with yourself");
+
+  // Make sure the other user actually exists and isn't deleted
+  const otherUser = await prisma.user.findUnique({
+    where:  { id: otherUserId },
+    select: { id: true, username: true, avatar: true, isDeleted: true },
+  });
+  if (!otherUser || otherUser.isDeleted)
+    throw new Error("User not found");
+
+  const pair = orderedPair(requestingUserId, otherUserId);
+
+  const conversation = await prisma.directConversation.upsert({
+    where:  { userAId_userBId: pair },
+    create: pair,
+    update: {}, // already exists — nothing to change
+    include: {
+      userA: { select: { id: true, username: true, avatar: true } },
+      userB: { select: { id: true, username: true, avatar: true } },
+      messages: {
+        where:   { deletedAt: null },
+        orderBy: { createdAt: "desc" },
+        take:    1,
+        include: { sender: { select: { id: true, username: true } } },
+      },
+    },
+  });
+
+  const other = conversation.userAId === requestingUserId
+    ? conversation.userB
+    : conversation.userA;
+
+  const lastMessage = conversation.messages[0] ?? null;
+
+  return {
+    id:           conversation.id,
+    otherUser:    other,
+    lastMessage:  lastMessage
+      ? {
+          content:   lastMessage.content,
+          senderId:  lastMessage.senderId,
+          createdAt: lastMessage.createdAt,
+        }
+      : null,
+    createdAt: conversation.createdAt,
+  };
+}
+
+// List all conversations the requesting user is part of, sorted by most
+// recently active (newest message first). Used to render the inbox list.
+async function listConversations(userId) {
+  const conversations = await prisma.directConversation.findMany({
+    where: {
+      OR: [{ userAId: userId }, { userBId: userId }],
+    },
+    include: {
+      userA: { select: { id: true, username: true, avatar: true } },
+      userB: { select: { id: true, username: true, avatar: true } },
+      messages: {
+        where:   { deletedAt: null },
+        orderBy: { createdAt: "desc" },
+        take:    1,
+      },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  return conversations.map((c) => {
+    const other = c.userAId === userId ? c.userB : c.userA;
+    const last  = c.messages[0] ?? null;
+    return {
+      id:        c.id,
+      otherUser: other,
+      lastMessage: last
+        ? {
+            content:   last.deletedAt ? null : last.content,
+            senderId:  last.senderId,
+            createdAt: last.createdAt,
+          }
+        : null,
+      updatedAt: c.updatedAt,
+    };
+  });
+}
+
+// ─── MESSAGES ─────────────────────────────────────────────────────────────────
+
+// Fetch a page of messages for a conversation, newest first (cursor-based).
+// The caller flips the display order on the frontend (oldest at top, like a
+// real chat). Pass `beforeId` to paginate backwards through older messages.
+async function getMessages(userId, conversationId, { beforeId } = {}) {
+  // Verify the user is actually a participant in this conversation
+  const conversation = await prisma.directConversation.findUnique({
+    where:  { id: conversationId },
+    select: { userAId: true, userBId: true },
+  });
+  if (!conversation) throw new Error("Conversation not found");
+  if (conversation.userAId !== userId && conversation.userBId !== userId)
+    throw new Error("Not authorised");
+
+  const messages = await prisma.directMessage.findMany({
+    where: {
+      conversationId,
+      ...(beforeId ? { id: { lt: beforeId } } : {}),
+    },
+    orderBy: { id: "desc" }, // newest first — frontend reverses for display
+    take:    MESSAGE_PAGE_SIZE,
+    include: {
+      sender: { select: { id: true, username: true, avatar: true } },
+    },
+  });
+
+  return {
+    messages:   messages.map(formatMessage),
+    hasMore:    messages.length === MESSAGE_PAGE_SIZE,
+    nextCursor: messages.length === MESSAGE_PAGE_SIZE
+      ? messages[messages.length - 1].id
+      : null,
+  };
+}
+
+// Send a new message. If quotedMessageId is provided, we snapshot the quoted
+// message's content and sender name at send time — so the quote survives even
+// if the original is later deleted.
+async function sendMessage(senderId, conversationId, { content, quotedMessageId }) {
+  if (!content?.trim()) throw new Error("Message content is required");
+
+  // Verify sender is a participant
+  const conversation = await prisma.directConversation.findUnique({
+    where:  { id: conversationId },
+    select: { userAId: true, userBId: true },
+  });
+  if (!conversation) throw new Error("Conversation not found");
+  if (conversation.userAId !== senderId && conversation.userBId !== senderId)
+    throw new Error("Not authorised");
+
+  // Resolve quote snapshot if needed
+  let quotedContent    = null;
+  let quotedSenderName = null;
+
+  if (quotedMessageId) {
+    const quoted = await prisma.directMessage.findUnique({
+      where:   { id: quotedMessageId },
+      include: { sender: { select: { username: true } } },
+    });
+    // Only quote messages from this same conversation
+    if (!quoted || quoted.conversationId !== conversationId)
+      throw new Error("Quoted message not found in this conversation");
+
+    // Snapshot — use the original text if available, otherwise note it was deleted
+    quotedContent    = quoted.deletedAt ? "(deleted message)" : quoted.content;
+    quotedSenderName = quoted.sender?.username ?? "Unknown";
+  }
+
+  const message = await prisma.directMessage.create({
+    data: {
+      conversationId,
+      senderId,
+      content:          content.trim(),
+      quotedMessageId:  quotedMessageId ?? null,
+      quotedContent,
+      quotedSenderName,
+    },
+    include: {
+      sender: { select: { id: true, username: true, avatar: true } },
+    },
+  });
+
+  // Bump conversation's updatedAt so inbox sorts correctly
+  await prisma.directConversation.update({
+    where: { id: conversationId },
+    data:  { updatedAt: new Date() },
+  });
+
+  // ── Notify the recipient ───────────────────────────────────────────────────
+  // Find the other participant in the conversation
+  const recipientId = conversation.userAId === senderId
+    ? conversation.userBId
+    : conversation.userAId;
+
+  // Get sender's username for the notification message, and the recipient's
+  // username + email so notifyUser() can push/email them.
+  const [sender, recipient] = await Promise.all([
+    prisma.user.findUnique({ where: { id: senderId }, select: { username: true } }),
+    prisma.user.findUnique({ where: { id: recipientId }, select: { id: true, username: true, email: true } }),
+  ]);
+
+  const senderName = sender?.username ?? "Someone";
+  const isReply    = !!quotedMessageId;
+
+  const notifMessage = isReply
+    ? `${senderName} replied to your message`
+    : `${senderName} sent you a message`;
+
+  if (recipient) {
+    // type: "MESSAGE" — notifyUser() skips writing an inbox/bell row for this
+    // type (the Messages page + sidebar badge already cover it) but still
+    // sends push/email if the user's "direct_message" preferences allow it.
+    await notifyUser(
+      recipient,
+      notifMessage,
+      `/messages/${conversationId}`,
+      "direct_message",
+      "MESSAGE"
+    );
+  }
+
+  return formatMessage(message);
+}
+
+// Soft-delete a message. Only the sender can delete their own message.
+async function deleteMessage(userId, messageId) {
+  const message = await prisma.directMessage.findUnique({
+    where:  { id: messageId },
+    select: { id: true, senderId: true, deletedAt: true },
+  });
+  if (!message)          throw new Error("Message not found");
+  if (message.senderId !== userId) throw new Error("Not authorised");
+  if (message.deletedAt) throw new Error("Message already deleted");
+
+  await prisma.directMessage.update({
+    where: { id: messageId },
+    data:  { deletedAt: new Date() },
+  });
+
+  return { message: "Message deleted" };
+}
+
+/**
+ * Mark a conversation as read for the requesting user.
+ * Sets lastReadByA or lastReadByB to now().
+ * Called whenever the user opens the Messages page or a specific conversation.
+ */
+async function markConversationRead(userId, conversationId) {
+  const conversation = await prisma.directConversation.findUnique({
+    where:  { id: conversationId },
+    select: { userAId: true, userBId: true },
+  });
+  if (!conversation) throw new Error("Conversation not found");
+  if (conversation.userAId !== userId && conversation.userBId !== userId)
+    throw new Error("Not authorised");
+ 
+  const isUserA = conversation.userAId === userId;
+ 
+  await prisma.directConversation.update({
+    where: { id: conversationId },
+    data:  isUserA
+      ? { lastReadByA: new Date() }
+      : { lastReadByB: new Date() },
+  });
+ 
+  return { ok: true };
+}
+
+
+module.exports = {
+  getOrCreateConversation,
+  listConversations,
+  getMessages,
+  sendMessage,
+  deleteMessage,
+  markConversationRead
+};

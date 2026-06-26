@@ -68,8 +68,20 @@ async function searchMembers(req, res) {
   }
 }
 
+// GET /api/leaderboard/homepage-activity — recent activity for the homepage
+async function getHomepageRecentActivity(req, res) {
+  try {
+    const data = await leaderboardService.getHomepageRecentActivity();
+    res.status(200).json(data);
+  } catch (error) {
+    console.error("getHomepageRecentActivity error:", error);
+    res.status(500).json({ message: "Something went wrong. Please try again later." });
+  }
+}
+
 module.exports = {
   getHomepageLeaderboards,
+  getHomepageRecentActivity,
   getTopCritiquers,
   getTopSprinters,
   getTopPracticeWriters,

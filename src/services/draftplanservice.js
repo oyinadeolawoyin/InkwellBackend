@@ -120,43 +120,60 @@ async function createPlan(userId, data) {
   );
 
   // ── Create ────────────────────────────────────────────────────────────────
-  const plan = await prisma.draftPlan.create({
-    data: {
-      userId,
-      storyTitle:        storyTitle.trim(),
-      premise:           premise.trim(),
-      wordsWrittenSoFar,
-      targetLength,
-      goalType,
-      dailyGoal,
-      weeklyGoal,
-      estimatedDays,
-      whyFinish:         whyFinish.trim(),
-      whatItMeans:       whatItMeans.trim(),
-      dailyTreat:        dailyTreat.trim(),
-      weeklyTreat:       weeklyTreat.trim(),
-      inspirationSource: inspirationSource.trim(),
-      moodboardImages:   images,
-      writingDays: {
-        create: writingDays.map((wd) => ({
-          day:             wd.day,
-          reminderTime:    wd.reminderTime,
-          reminderTimeUTC: localTimeToUTCReliable(wd.reminderTime, timezone),
-        })),
+  // Wrapped in try/catch: this is reached from the guest-signup → create-
+  // plan flow too (see draftPlanWizard.jsx's handleSignedUp), so it's
+  // possible for a userId to already have a plan row by the time this runs
+  // (double-submit, duplicate tab, retry after a slow response, etc).
+  // Without this, Prisma's raw "Unique constraint failed on the fields:
+  // (`userId`)" error leaks straight to the UI (see screenshot). We catch
+  // that specific case (P2002 on userId) and turn it into a clean,
+  // recognizable message the frontend can branch on to redirect to the
+  // existing plan instead of showing a dead-end error.
+  let plan;
+  try {
+    plan = await prisma.draftPlan.create({
+      data: {
+        userId,
+        storyTitle:        storyTitle.trim(),
+        premise:           premise.trim(),
+        wordsWrittenSoFar,
+        targetLength,
+        goalType,
+        dailyGoal,
+        weeklyGoal,
+        estimatedDays,
+        whyFinish:         whyFinish.trim(),
+        whatItMeans:       whatItMeans.trim(),
+        dailyTreat:        dailyTreat.trim(),
+        weeklyTreat:       weeklyTreat.trim(),
+        inspirationSource: inspirationSource.trim(),
+        moodboardImages:   images,
+        writingDays: {
+          create: writingDays.map((wd) => ({
+            day:             wd.day,
+            reminderTime:    wd.reminderTime,
+            reminderTimeUTC: localTimeToUTCReliable(wd.reminderTime, timezone),
+          })),
+        },
+        characters: {
+          create: chars.map((c) => ({
+            name:        c.name.trim(),
+            description: c.description?.trim() ?? "",
+          })),
+        },
       },
-      characters: {
-        create: chars.map((c) => ({
-          name:        c.name.trim(),
-          description: c.description?.trim() ?? "",
-        })),
+      include: {
+        writingDays:  true,
+        characters:   true,
+        progressLogs: true,
       },
-    },
-    include: {
-      writingDays:  true,
-      characters:   true,
-      progressLogs: true,
-    },
-  });
+    });
+  } catch (err) {
+    if (err.code === "P2002" && err.meta?.target?.includes("userId")) {
+      throw new Error("You already have a draft plan.");
+    }
+    throw err;
+  }
 
   return plan;
 }

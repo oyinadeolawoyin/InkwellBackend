@@ -9,6 +9,7 @@ function errStatus(msg) {
   if (msg.includes("not found"))                    return 404;
   if (msg.includes("Not authorised"))               return 403;
   if (msg.includes("already been marked complete")) return 409;
+  if (msg.includes("already have a draft plan"))    return 409;
   return 400;
 }
 

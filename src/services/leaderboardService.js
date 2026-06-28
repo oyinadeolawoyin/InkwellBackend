@@ -174,7 +174,10 @@ async function getYesterdayDraftWriters() {
   const userIds = raw.map((r) => r.userId);
   const users   = await prisma.user.findMany({
     where:  { id: { in: userIds }, isDeleted: false },
-    select: { id: true, username: true, avatar: true },
+    select: {
+      id: true, username: true, avatar: true,
+      draftPlan: { select: { goalType: true } },
+    },
   });
   const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
 
@@ -182,7 +185,9 @@ async function getYesterdayDraftWriters() {
   for (const r of raw) {
     const user = userMap[r.userId];
     if (!user) continue;
-    results.push({ user, wordCount: r._sum.countLogged ?? 0 });
+    const goalType = user.draftPlan?.goalType ?? "WORDS";
+    const { draftPlan, ...userWithoutPlan } = user;
+    results.push({ user: userWithoutPlan, countLogged: r._sum.countLogged ?? 0, goalType });
     if (results.length === LIMIT) break;
   }
   return results;
@@ -506,7 +511,10 @@ async function getTodayProgressLoggers() {
   const userIds = raw.map((r) => r.userId);
   const users   = await prisma.user.findMany({
     where:  { id: { in: userIds }, isDeleted: false },
-    select: { id: true, username: true, avatar: true },
+    select: {
+      id: true, username: true, avatar: true,
+      draftPlan: { select: { goalType: true } },
+    },
   });
   const userMap = Object.fromEntries(users.map((u) => [u.id, u]));
 
@@ -514,7 +522,13 @@ async function getTodayProgressLoggers() {
   for (const r of raw) {
     const user = userMap[r.userId];
     if (!user) continue;
-    results.push({ user, wordsLogged: r._sum.countLogged ?? 0 });
+    const goalType = user.draftPlan?.goalType ?? "WORDS";
+    const { draftPlan, ...userWithoutPlan } = user;
+    results.push({
+      user: userWithoutPlan,
+      countLogged: r._sum.countLogged ?? 0,
+      goalType,
+    });
   }
   return results;
 }

@@ -109,7 +109,7 @@ async function deleteCategory(req, res) {
 // ─── Threads ──────────────────────────────────────────────────────────────────
 
 async function createThread(req, res) {
-  const { title, context, isPinned, categoryId } = req.body;
+  const { title, context, isPinned, categoryId, link } = req.body;
   if (!title)   return res.status(400).json({ message: "Title is required." });
   if (!context) return res.status(400).json({ message: "Context is required." });
 
@@ -125,6 +125,7 @@ async function createThread(req, res) {
       title,
       context,
       mediaUrl,
+      link:       link || null,
       isPinned: wantsPinned,
     });
 
@@ -220,7 +221,7 @@ async function updateThread(req, res) {
     return res.status(403).json({ message: "Admin access required." });
   }
   const threadId = Number(req.params.threadId);
-  const { title, context, isPinned, categoryId } = req.body;
+  const { title, context, isPinned, categoryId, link } = req.body;
   try {
     const existing = await threadService.findThread(threadId);
     if (!existing) return res.status(404).json({ message: "Thread not found." });
@@ -235,6 +236,7 @@ async function updateThread(req, res) {
       title,
       context,
       mediaUrl,
+      link:       link !== undefined ? (link || null) : undefined,
       isPinned:   isPinned   !== undefined ? (isPinned === "true" || isPinned === true) : undefined,
       categoryId: categoryId !== undefined ? (categoryId ? Number(categoryId) : null) : undefined,
     });

@@ -197,7 +197,7 @@ async function deleteCategory(categoryId) {
 
 // ─── Threads ──────────────────────────────────────────────────────────────────
 
-async function createThread({ authorId, categoryId, title, context, mediaUrl, isPinned }) {
+async function createThread({ authorId, categoryId, title, context, mediaUrl, link, isPinned }) {
   const thread = await prisma.thread.create({
     data: {
       authorId,
@@ -205,6 +205,7 @@ async function createThread({ authorId, categoryId, title, context, mediaUrl, is
       title,
       context,
       mediaUrl: mediaUrl || null,
+      link: link || null,
       isPinned: isPinned ?? false,
     },
     include: {
@@ -387,13 +388,14 @@ async function findThread(threadId) {
   });
 }
 
-async function updateThread(threadId, { title, context, mediaUrl, isPinned, categoryId }) {
+async function updateThread(threadId, { title, context, mediaUrl, link, isPinned, categoryId }) {
   const thread = await prisma.thread.update({
     where: { id: threadId },
     data: {
       ...(title      !== undefined && { title }),
       ...(context    !== undefined && { context }),
       ...(mediaUrl   !== undefined && { mediaUrl }),
+      ...(link       !== undefined && { link: link || null }),
       ...(isPinned   !== undefined && { isPinned }),
       ...(categoryId !== undefined && { categoryId }),
     },

@@ -441,7 +441,8 @@ model Thread {
   categoryId Int?                                        // null = "uncategorised"
   title      String
   context    String                                      // body of the thread
-  mediaUrl   String?                                     // optional image/attachment
+  mediaUrl   String? 
+  link       String?                                    // optional image/attachment
   isPinned   Boolean  @default(false)                    // only admins should pin
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt

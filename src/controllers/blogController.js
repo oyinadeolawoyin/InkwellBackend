@@ -17,6 +17,17 @@ async function uploadImage(req, res) {
 
 // ─── Posts (Admin only for mutations) ────────────────────────────────────────
 
+// Keep this in sync with POST_CATEGORIES in adminBlog.jsx and CATEGORIES in
+// blog.jsx — a post's category must be one of these or it won't show up on
+// the Community page's category sections.
+const VALID_POST_CATEGORIES = [
+  "Stories from Writers",
+  "Writing Tips",
+  "Finished Drafts",
+  "Opinion",
+  "Community Update & News",
+];
+
 async function createPost(req, res) {
   if (req.user.role !== "ADMIN") {
     return res.status(403).json({ message: "Admin access required." });
@@ -24,6 +35,10 @@ async function createPost(req, res) {
 
   const { title, content, link, seriesId, seriesOrder, category, tag } = req.body;
   if (!content) return res.status(400).json({ message: "Content is required." });
+  if (!category) return res.status(400).json({ message: "Category is required." });
+  if (!VALID_POST_CATEGORIES.includes(category)) {
+    return res.status(400).json({ message: "Invalid category." });
+  }
 
   try {
     let mediaUrl = null;
@@ -53,6 +68,8 @@ async function createPost(req, res) {
       category: category || null,
       tag: tag || null,
     });
+
+    res.status(201).json({ post });
 
     // Notify all members about the new community post (fire and forget).
     // Push/email only reach users who've opted in to "community_new_post"
@@ -124,6 +141,13 @@ async function updatePost(req, res) {
 
   const postId = Number(req.params.postId);
   const { title, content, link, seriesId, seriesOrder, category, tag } = req.body;
+
+  // The admin form always sends category as a controlled <select>, so if it's
+  // present in the request at all, it must be non-empty and valid — this is
+  // what stops a post from silently losing its category during an edit.
+  if (category !== undefined && (!category || !VALID_POST_CATEGORIES.includes(category))) {
+    return res.status(400).json({ message: "Invalid category." });
+  }
 
   try {
     const existing = await blogService.findPost(postId);

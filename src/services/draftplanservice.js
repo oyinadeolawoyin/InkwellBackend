@@ -202,6 +202,7 @@ async function updatePlan(userId, data) {
     storyTitle, premise, whyFinish, whatItMeans,
     dailyTreat, weeklyTreat, inspirationSource,
     moodboardImages, characters, dailyGoal, writingDays,
+    targetLength, wordsWrittenSoFar,
   } = data;
 
   if (characters) {
@@ -213,20 +214,41 @@ async function updatePlan(userId, data) {
     }
   }
 
-  // Recalculate derived fields if dailyGoal or writingDays changed
+  // Validate the new goal-math fields, same rules as plan creation.
+  if (targetLength !== undefined) {
+    if (typeof targetLength !== "number" || targetLength < 1)
+      throw new Error("Target length must be a positive number");
+  }
+  if (wordsWrittenSoFar !== undefined) {
+    if (typeof wordsWrittenSoFar !== "number" || wordsWrittenSoFar < 0)
+      throw new Error("Words written so far must be 0 or more");
+  }
+
+  // Recalculate derived fields whenever any input to that math changed —
+  // dailyGoal/writingDays (existing behavior), or the new editable
+  // targetLength/wordsWrittenSoFar fields. All four feed the same formula,
+  // so any one of them changing means estimatedDays/weeklyGoal are stale.
   let recalcFields = {};
-  if (dailyGoal !== undefined || writingDays !== undefined) {
-    const newDailyGoal   = dailyGoal    ?? plan.dailyGoal;
-    const newDaysCount   = writingDays  ? writingDays.length : plan.writingDays.length;
+  let newTotalSoFar; // set below whenever we touch the goal math, used for isCompleted too
+  if (
+    dailyGoal !== undefined || writingDays !== undefined ||
+    targetLength !== undefined || wordsWrittenSoFar !== undefined
+  ) {
+    const newDailyGoal       = dailyGoal          ?? plan.dailyGoal;
+    const newDaysCount       = writingDays        ? writingDays.length : plan.writingDays.length;
+    const newTargetLength    = targetLength       ?? plan.targetLength;
+    const newWordsSoFarBase  = wordsWrittenSoFar   ?? plan.wordsWrittenSoFar;
+
     const totalLogged    = await prisma.draftProgressLog.aggregate({
       where: { planId: plan.id },
       _sum:  { countLogged: true },
     });
     const logged         = totalLogged._sum.countLogged ?? 0;
-    const remaining      = Math.max(plan.targetLength - plan.wordsWrittenSoFar - logged, 0);
+    newTotalSoFar         = newWordsSoFarBase + logged;
+
     recalcFields         = calcDerivedFields(
-      plan.targetLength,
-      plan.wordsWrittenSoFar + logged,
+      newTargetLength,
+      newTotalSoFar,
       newDailyGoal,
       newDaysCount
     );
@@ -258,19 +280,37 @@ async function updatePlan(userId, data) {
     });
   }
 
+  // Keep isCompleted accurate whenever the goal math changed — same
+  // "newTotal >= targetLength" rule logProgress() uses, so editing these
+  // fields can flip the plan in or out of "completed" immediately rather
+  // than waiting for the next logged session to notice the mismatch.
+  let completionFields = {};
+  if (newTotalSoFar !== undefined) {
+    const newTargetLength = targetLength ?? plan.targetLength;
+    const isDraftDone     = newTotalSoFar >= newTargetLength;
+    if (isDraftDone && !plan.isCompleted) {
+      completionFields = { isCompleted: true, completedAt: new Date() };
+    } else if (!isDraftDone && plan.isCompleted) {
+      completionFields = { isCompleted: false, completedAt: null };
+    }
+  }
+
   const updated = await prisma.draftPlan.update({
     where: { id: plan.id },
     data: {
-      ...(storyTitle        !== undefined && { storyTitle:        storyTitle.trim() }),
-      ...(premise           !== undefined && { premise:           premise.trim() }),
-      ...(whyFinish         !== undefined && { whyFinish:         whyFinish.trim() }),
-      ...(whatItMeans       !== undefined && { whatItMeans:       whatItMeans.trim() }),
-      ...(dailyTreat        !== undefined && { dailyTreat:        dailyTreat.trim() }),
-      ...(weeklyTreat       !== undefined && { weeklyTreat:       weeklyTreat.trim() }),
-      ...(inspirationSource !== undefined && { inspirationSource: inspirationSource.trim() }),
-      ...(moodboardImages   !== undefined && { moodboardImages:   moodboardImages.slice(0, 5) }),
-      ...(dailyGoal         !== undefined && { dailyGoal }),
+      ...(storyTitle         !== undefined && { storyTitle:        storyTitle.trim() }),
+      ...(premise            !== undefined && { premise:           premise.trim() }),
+      ...(whyFinish          !== undefined && { whyFinish:         whyFinish.trim() }),
+      ...(whatItMeans        !== undefined && { whatItMeans:       whatItMeans.trim() }),
+      ...(dailyTreat         !== undefined && { dailyTreat:        dailyTreat.trim() }),
+      ...(weeklyTreat        !== undefined && { weeklyTreat:       weeklyTreat.trim() }),
+      ...(inspirationSource  !== undefined && { inspirationSource: inspirationSource.trim() }),
+      ...(moodboardImages    !== undefined && { moodboardImages:   moodboardImages.slice(0, 5) }),
+      ...(dailyGoal          !== undefined && { dailyGoal }),
+      ...(targetLength       !== undefined && { targetLength }),
+      ...(wordsWrittenSoFar  !== undefined && { wordsWrittenSoFar }),
       ...recalcFields,
+      ...completionFields,
     },
     include: {
       writingDays:  true,
